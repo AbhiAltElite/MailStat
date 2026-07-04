@@ -318,9 +318,21 @@ export default function App() {
   };
 
   const openUnsubscribe = async (raw: string) => {
+    // List-Unsubscribe is an attacker-controlled email header (any sender
+    // can set it), so only ever hand the OS opener a scheme that RFC 8058
+    // actually allows there: never a raw file:, javascript:, or custom
+    // scheme some other installed app registered.
+    const ALLOWED_SCHEMES = ["http:", "https:", "mailto:"];
     const targets = [...raw.matchAll(/<([^>]+)>/g)].map((m) => m[1]);
-    const url = targets.find((t) => t.startsWith("http")) ?? targets[0];
-    if (!url) return notify("No unsubscribe link in this header");
+    const safe = targets.filter((t) => {
+      try {
+        return ALLOWED_SCHEMES.includes(new URL(t).protocol);
+      } catch {
+        return false;
+      }
+    });
+    const url = safe.find((t) => t.startsWith("http")) ?? safe[0];
+    if (!url) return notify("No safe unsubscribe link (http, https, or mailto) in this header");
     if (isTauri) await openUrl(url);
     else window.open(url, "_blank");
   };

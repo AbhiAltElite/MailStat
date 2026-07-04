@@ -25,6 +25,24 @@ fn open_db(state: &AppState) -> Result<rusqlite::Connection, String> {
     db::open(&state.db_path).map_err(|e| e.to_string())
 }
 
+/// The only grouping dimensions queries.rs knows how to build SQL for, plus
+/// "msg" which addresses one specific message tile directly (handled before
+/// any SQL is built, in queries::ids_for_path). dim_exprs()/seg_filter()
+/// already fall back to a harmless no-op for any other value, so this isn't
+/// an injection guard, but it turns an unrecognized dimension into a clear
+/// error instead of silently grouping everything into one bucket or
+/// dropping a filter.
+const VALID_DIMS: [&str; 5] = ["folder", "sender", "type", "year", "msg"];
+
+fn check_dims(group_by: &[String], path: &[PathSeg]) -> Result<(), String> {
+    for d in group_by.iter().chain(path.iter().map(|p| &p.dim)) {
+        if !VALID_DIMS.contains(&d.as_str()) {
+            return Err(format!("Unknown grouping dimension: {d}"));
+        }
+    }
+    Ok(())
+}
+
 fn creds_for(conn: &rusqlite::Connection, account_id: i64) -> Result<ImapCreds, String> {
     let (host, port, username): (String, u16, String) = conn
         .query_row(
@@ -185,6 +203,7 @@ fn get_treemap(
     group_by: Vec<String>,
     path: Vec<PathSeg>,
 ) -> Result<Vec<TreeNode>, String> {
+    check_dims(&group_by, &path)?;
     let conn = open_db(&state)?;
     queries::get_treemap(&conn, account_id, &group_by, &path).map_err(|e| e.to_string())
 }
@@ -232,19 +251,29 @@ async fn get_message_body(state: State<'_, AppState>, message_id: i64) -> Result
     let db_path = state.db_path.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let conn = db::open(&db_path).map_err(|e| e.to_string())?;
-        let (account_id, folder_path, uid, kind): (i64, String, i64, String) = conn
+        let (account_id, folder_path, uid, kind, size): (i64, String, i64, String, i64) = conn
             .query_row(
-                "SELECT m.account_id, f.path, m.uid, a.kind FROM messages m \
+                "SELECT m.account_id, f.path, m.uid, a.kind, m.size FROM messages m \
                  JOIN folders f ON f.id = m.folder_id \
                  JOIN accounts a ON a.id = m.account_id \
                  WHERE m.id = ?1",
                 params![message_id],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
             )
             .map_err(|e| e.to_string())?;
 
         if kind == "demo" {
             return Ok(content::demo_body());
+        }
+
+        // Refuse before fetching: a message's already-known size (from the
+        // scan) could be huge, and BODY.PEEK[] pulls the whole thing into
+        // memory with no size limit of its own.
+        if size > content::MAX_FETCH_BYTES {
+            return Err(format!(
+                "This message is {} MB, too large to preview here. Open it in your provider's webmail instead.",
+                size / 1_000_000
+            ));
         }
 
         let creds = creds_for(&conn, account_id)?;
@@ -269,6 +298,7 @@ async fn get_message_body(state: State<'_, AppState>, message_id: i64) -> Result
 /// preview and then act on "everything inside this tile".
 #[tauri::command]
 fn ids_for_path(state: State<AppState>, account_id: i64, path: Vec<PathSeg>) -> Result<Vec<i64>, String> {
+    check_dims(&[], &path)?;
     let conn = open_db(&state)?;
     queries::ids_for_path(&conn, account_id, &path).map_err(|e| e.to_string())
 }
@@ -356,4 +386,27 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn check_dims_accepts_known_dimensions() {
+        let group_by = vec!["folder".to_string(), "sender".to_string()];
+        let path = vec![
+            PathSeg { dim: "folder".into(), key: "1".into() },
+            PathSeg { dim: "year".into(), key: "2024".into() },
+            PathSeg { dim: "msg".into(), key: "m:5".into() },
+        ];
+        assert!(check_dims(&group_by, &path).is_ok());
+    }
+
+    #[test]
+    fn check_dims_rejects_unknown_dimension() {
+        let path = vec![PathSeg { dim: "'; DROP TABLE messages; --".into(), key: "x".into() }];
+        let err = check_dims(&[], &path).unwrap_err();
+        assert!(err.contains("Unknown grouping dimension"));
+    }
 }

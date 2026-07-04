@@ -6,6 +6,11 @@ use mailparse::ParsedMail;
 
 const CAP: usize = 200_000;
 
+/// Above this, refuse to fetch a message's raw body at all rather than pull
+/// an unbounded amount of server-controlled data into memory. Applied
+/// against the size already known from the scan, before any network call.
+pub const MAX_FETCH_BYTES: i64 = 25_000_000;
+
 fn is_attachment(part: &ParsedMail) -> bool {
     part.headers.iter().any(|h| {
         h.get_key().eq_ignore_ascii_case("content-disposition")
