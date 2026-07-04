@@ -145,7 +145,13 @@ function Largest({ largest, checkedMessages, onToggleMessage, onOpenMessage }: P
   );
 }
 
-function Unsubscribe({ unsubscribe, checkedSenders, onToggleSender, onOpenUnsubscribe }: Props) {
+function Unsubscribe({
+  unsubscribe,
+  checkedSenders,
+  onToggleSender,
+  onOpenUnsubscribe,
+  onFocusSender,
+}: Props) {
   if (!unsubscribe.length) {
     return (
       <p className="p-3 text-xs text-faint">
@@ -167,7 +173,11 @@ function Unsubscribe({ unsubscribe, checkedSenders, onToggleSender, onOpenUnsubs
                 aria-label={`Select ${s.name}`}
               />
             </td>
-            <td className="max-w-0 py-1 pr-2">
+            <td
+              className="max-w-0 cursor-pointer py-1 pr-2"
+              onClick={() => onFocusSender(s.email, s.name)}
+              title="Show this sender's mail in the treemap"
+            >
               <div className="truncate text-ink">{s.name}</div>
               <div className="truncate text-[11px] text-faint">
                 {formatCount(s.count)} messages · {formatBytes(s.size)}
@@ -176,7 +186,10 @@ function Unsubscribe({ unsubscribe, checkedSenders, onToggleSender, onOpenUnsubs
             <td className="w-24 py-1 pr-1 text-right">
               {s.unsubscribe && (
                 <button
-                  onClick={() => onOpenUnsubscribe(s.unsubscribe!)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onOpenUnsubscribe(s.unsubscribe!);
+                  }}
                   className="rounded-md border border-line px-2 py-0.5 text-[11px] text-muted hover:bg-raised hover:text-ink"
                 >
                   Unsubscribe
