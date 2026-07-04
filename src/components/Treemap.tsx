@@ -191,6 +191,11 @@ export default function Treemap({
     // Compare against the actual on-screen size so labels appear on tiles
     // that are too small at 100% but become readable once zoomed in.
     const s = zoom.scale;
+    // Font sizes and text offsets are authored in world units but drawn
+    // through a scaled transform, so they must be divided by the current
+    // zoom to stay a constant, readable size on screen instead of growing
+    // without bound as you zoom in.
+    const inv = 1 / s;
 
     // Group headers (depth 1 with children)
     for (const g of root.children ?? []) {
@@ -200,10 +205,15 @@ export default function Treemap({
       ctx.fillStyle = groupBg;
       ctx.fillRect(g.x0, g.y0, w, h);
       if (w * s > 40 && h * s > 18) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(g.x0, g.y0, w, h);
+        ctx.clip();
         ctx.fillStyle = groupText;
-        ctx.font = "600 10px ui-sans-serif, system-ui";
+        ctx.font = `600 ${10 * inv}px ui-sans-serif, system-ui`;
         const label = `${g.data.label}  ·  ${formatBytes(g.data.size)}`;
-        ctx.fillText(ellipsize(ctx, label, w - 10), g.x0 + 5, g.y0 + 11.5);
+        ctx.fillText(ellipsize(ctx, label, w - 10 * inv), g.x0 + 5 * inv, g.y0 + 11.5 * inv);
+        ctx.restore();
       }
     }
 
@@ -228,19 +238,30 @@ export default function Treemap({
 
       if (selectedKey && keyPathOf(leaf) === selectedKey) {
         ctx.strokeStyle = outline;
-        ctx.lineWidth = 2 / s;
-        ctx.strokeRect(leaf.x0 + 1 / s, leaf.y0 + 1 / s, w - 2 / s, h - 2 / s);
+        ctx.lineWidth = 2 * inv;
+        ctx.strokeRect(leaf.x0 + inv, leaf.y0 + inv, w - 2 * inv, h - 2 * inv);
       }
 
       if (w * s > 60 && h * s > 26) {
+        // Clip so text can never bleed past its own tile into a neighbor,
+        // which is what made high zoom look broken.
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(leaf.x0, leaf.y0, w, h);
+        ctx.clip();
         ctx.fillStyle = "rgba(255,255,255,0.92)";
-        ctx.font = "11px ui-sans-serif, system-ui";
-        ctx.fillText(ellipsize(ctx, d.label || "(no subject)", w - 10), leaf.x0 + 5, leaf.y0 + 14);
+        ctx.font = `${11 * inv}px ui-sans-serif, system-ui`;
+        ctx.fillText(
+          ellipsize(ctx, d.label || "(no subject)", w - 10 * inv),
+          leaf.x0 + 5 * inv,
+          leaf.y0 + 14 * inv,
+        );
         if (h * s > 40) {
           ctx.fillStyle = "rgba(255,255,255,0.55)";
-          ctx.font = "10px ui-sans-serif, system-ui";
-          ctx.fillText(formatBytes(d.size), leaf.x0 + 5, leaf.y0 + 27);
+          ctx.font = `${10 * inv}px ui-sans-serif, system-ui`;
+          ctx.fillText(formatBytes(d.size), leaf.x0 + 5 * inv, leaf.y0 + 27 * inv);
         }
+        ctx.restore();
       }
     }
 

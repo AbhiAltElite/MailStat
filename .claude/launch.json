@@ -7,6 +7,13 @@
       "runtimeArgs": ["run", "dev"],
       "cwd": "/Users/abhi/Documents/GitHub/mailstat",
       "port": 1420
+    },
+    {
+      "name": "mailstat-preview",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "preview", "--", "--port", "4173", "--strictPort"],
+      "cwd": "/Users/abhi/Documents/GitHub/mailstat",
+      "port": 4173
     }
   ]
 }
