@@ -1,9 +1,10 @@
 [package]
 name = "mailstat"
 version = "0.1.0"
-description = "WinDirStat for email — see where your mailbox bytes live, then clean up"
+description = "A mailbox space analyzer. Treemap your email, then clean it up."
 authors = ["Abhiram Ramachandran"]
 edition = "2021"
+license = "MIT"
 
 [lib]
 name = "mailstat_lib"

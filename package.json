@@ -2,6 +2,13 @@
   "name": "mailstat",
   "private": true,
   "version": "0.1.0",
+  "description": "A mailbox space analyzer. Treemap your email, then clean it up.",
+  "license": "MIT",
+  "author": "Abhiram Ramachandran",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/<your-user>/mailstat.git"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite",

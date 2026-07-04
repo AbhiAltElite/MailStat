@@ -148,18 +148,51 @@ pub fn scan_account(
         .list(Some(""), Some("*"))
         .map_err(|e| format!("LIST failed: {e}"))?;
 
-    // Collect selectable folders; on Gmail keep only All Mail/Trash/Spam to
-    // avoid counting the same message once per label.
+    // Collect selectable folders; on Gmail, prefer All Mail/Trash/Spam so a
+    // message isn't counted once per label it carries. Gmail only exposes
+    // "All Mail" over IMAP when the user has ticked "Show in IMAP" for it in
+    // Gmail's label settings, so fall back to every folder (accepting some
+    // per-label duplication) when that folder isn't there rather than ending
+    // up with an empty scan.
     let mut folders: Vec<String> = names
         .iter()
         .filter(|n| !format!("{:?}", n.attributes()).contains("NoSelect"))
         .map(|n| n.name().to_string())
         .collect();
-    let is_gmail = folders.iter().any(|f| f.starts_with("[Gmail]"));
-    if is_gmail {
-        folders.retain(|f| {
-            f == "[Gmail]/All Mail" || f == "[Gmail]/Trash" || f == "[Gmail]/Spam"
-        });
+    let is_gmail_bracket = |f: &str| {
+        let lower = f.to_ascii_lowercase();
+        lower.starts_with("[gmail]") || lower.starts_with("[google mail]")
+    };
+    if folders.iter().any(|f| is_gmail_bracket(f)) {
+        let all_mail = folders
+            .iter()
+            .find(|f| is_gmail_bracket(f) && special_of(f) == Some("archive"))
+            .cloned();
+        if let Some(all_mail) = all_mail {
+            let mut keep = vec![all_mail];
+            if let Some(t) = folders.iter().find(|f| special_of(f) == Some("trash")).cloned() {
+                keep.push(t);
+            }
+            if let Some(s) = folders.iter().find(|f| special_of(f) == Some("junk")).cloned() {
+                keep.push(s);
+            }
+            folders.retain(|f| keep.contains(f));
+        }
+        // Otherwise: All Mail isn't exposed over IMAP for this account, so
+        // scan every folder as-is, same as a non-Gmail provider.
+    }
+
+    if folders.is_empty() {
+        let _ = app.emit(
+            "scan-error",
+            (
+                account_id,
+                "No folders were found to scan. If this is a Gmail account, check Settings, \
+                 See all settings, Labels, and enable \"Show in IMAP\" for at least Inbox."
+                    .to_string(),
+            ),
+        );
+        return Ok(());
     }
 
     let folder_count = folders.len();

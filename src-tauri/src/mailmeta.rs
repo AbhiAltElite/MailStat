@@ -10,7 +10,7 @@ pub struct AttachmentMeta {
     pub size: u32,
 }
 
-/// Category used for treemap colouring — the email analogue of a file extension.
+/// Category used for treemap coloring, derived the way a file extension would be.
 pub fn categorize(ext: &str, mime: &str) -> &'static str {
     match ext.to_ascii_lowercase().as_str() {
         "jpg" | "jpeg" | "png" | "gif" | "webp" | "heic" | "bmp" | "tiff" | "svg" => "image",

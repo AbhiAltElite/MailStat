@@ -15,7 +15,7 @@ export function formatCount(n: number): string {
 }
 
 export function formatDate(unix: number | null): string {
-  if (!unix) return "—";
+  if (!unix) return "No date";
   return new Date(unix * 1000).toLocaleDateString(undefined, {
     year: "numeric",
     month: "short",

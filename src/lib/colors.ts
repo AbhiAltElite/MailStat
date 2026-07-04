@@ -1,4 +1,4 @@
-/** Category palette — the email analogue of WinDirStat's extension colors. */
+/** Content-type palette used to color treemap tiles and the type legend. */
 export const CATEGORY_COLORS: Record<string, string> = {
   plain: "#4f6d8f",
   image: "#3fa66c",
