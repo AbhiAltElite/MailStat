@@ -68,6 +68,28 @@ export interface MessageRow {
   cat: string;
 }
 
+export interface AttachmentInfo {
+  filename: string;
+  mime: string;
+  ext: string;
+  size: number;
+}
+
+export interface MessageDetail {
+  id: number;
+  subject: string;
+  from_email: string;
+  from_name: string;
+  folder: string;
+  date: number | null;
+  size: number;
+  cat: string;
+  list_unsubscribe: string | null;
+  attachments: AttachmentInfo[];
+  thread: MessageRow[];
+  from_sender: MessageRow[];
+}
+
 export interface TypeStat {
   cat: string;
   count: number;
@@ -118,6 +140,7 @@ const tauriApi = {
     invoke<MessageRow[]>("get_largest_messages", { accountId, limit }),
   typeStats: (accountId: number) => invoke<TypeStat[]>("get_type_stats", { accountId }),
   accountStats: (accountId: number) => invoke<AccountStats>("get_account_stats", { accountId }),
+  messageDetail: (messageId: number) => invoke<MessageDetail>("get_message_detail", { messageId }),
   idsForPath: (accountId: number, path: PathSeg[]) =>
     invoke<number[]>("ids_for_path", { accountId, path: strip(path) }),
   idsForSenders: (accountId: number, senders: string[]) =>

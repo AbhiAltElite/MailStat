@@ -6,6 +6,7 @@ import type {
   AccountStats,
   ActionResult,
   FolderInfo,
+  MessageDetail,
   MessageRow,
   NewAccount,
   PathSeg,
@@ -338,6 +339,57 @@ export const mockApi = {
     const removed = messages.filter((m) => set.has(m.id));
     messages = messages.filter((m) => !set.has(m.id));
     return { affected: removed.length, bytes: removed.reduce((a, m) => a + m.size, 0) };
+  },
+  async messageDetail(messageId: number): Promise<MessageDetail> {
+    const m = messages.find((x) => x.id === messageId);
+    if (!m) throw "message not found";
+    const norm = m.subject.toLowerCase().trim();
+    const toRow = (x: MockMsg): MessageRow => ({
+      id: x.id,
+      subject: x.subject,
+      from_email: x.fromEmail,
+      from_name: x.fromName,
+      folder: x.folderName,
+      date: x.date,
+      size: x.size,
+      cat: x.cat,
+    });
+    const thread = messages
+      .filter((x) => x.subject.toLowerCase().trim() === norm)
+      .sort((a, b) => Math.abs(a.date - m.date) - Math.abs(b.date - m.date))
+      .slice(0, 30)
+      .sort((a, b) => a.date - b.date)
+      .map(toRow);
+    const fromSender = messages
+      .filter((x) => x.fromEmail === m.fromEmail && x.id !== m.id)
+      .sort((a, b) => b.size - a.size)
+      .slice(0, 15)
+      .map(toRow);
+    const attachments =
+      m.cat === "plain"
+        ? []
+        : [
+            {
+              filename: `file-${m.id}.${m.cat === "image" ? "jpg" : m.cat === "video" ? "mp4" : m.cat}`,
+              mime: `${m.cat}/x-demo`,
+              ext: m.cat,
+              size: Math.round(m.size * 0.8),
+            },
+          ];
+    return {
+      id: m.id,
+      subject: m.subject,
+      from_email: m.fromEmail,
+      from_name: m.fromName,
+      folder: m.folderName,
+      date: m.date,
+      size: m.size,
+      cat: m.cat,
+      list_unsubscribe: m.unsub,
+      attachments,
+      thread,
+      from_sender: fromSender,
+    };
   },
   async seedDemo(): Promise<number> {
     seed();

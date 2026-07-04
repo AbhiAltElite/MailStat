@@ -25,7 +25,7 @@ const PRESETS: Preset[] = [
     name: "Fastmail",
     host: "imap.fastmail.com",
     port: 993,
-    hint: "Create an app password in Fastmail Settings → Privacy & Security.",
+    hint: "Create an app password in Fastmail Settings, under Privacy and Security.",
   },
   {
     name: "Yahoo",
@@ -33,8 +33,11 @@ const PRESETS: Preset[] = [
     port: 993,
     hint: "Generate an app password in Yahoo Account Security settings.",
   },
-  { name: "Other IMAP", host: "", port: 993, hint: "Any IMAP server with TLS (port 993)." },
+  { name: "Other IMAP", host: "", port: 993, hint: "Any IMAP server with TLS on port 993." },
 ];
+
+const inputClass =
+  "mt-1 w-full rounded-md border border-line bg-canvas px-2.5 py-1.5 text-[13px] text-ink outline-none focus:border-accent";
 
 interface Props {
   onClose: () => void;
@@ -61,14 +64,7 @@ export default function AddAccountModal({ onClose, onAdd }: Props) {
     setBusy(true);
     setError(null);
     try {
-      await onAdd({
-        email,
-        label: email,
-        host,
-        port,
-        username: email,
-        password,
-      });
+      await onAdd({ email, label: email, host, port, username: email, password });
       onClose();
     } catch (err) {
       setError(String(err));
@@ -78,15 +74,15 @@ export default function AddAccountModal({ onClose, onAdd }: Props) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
       <form
         onSubmit={submit}
-        className="w-[420px] rounded-lg border border-slate-700 bg-slate-900 p-5 shadow-2xl"
+        className="w-105 rounded-lg border border-line bg-surface p-5 shadow-2xl"
       >
-        <h2 className="text-[15px] font-semibold text-slate-100">Add IMAP account</h2>
-        <p className="mt-1 text-[12px] text-slate-400">
-          Mailstat reads message sizes and headers only — never bodies. Credentials stay in your
-          OS keychain.
+        <h2 className="text-[15px] font-semibold text-ink">Add IMAP account</h2>
+        <p className="mt-1 text-xs leading-relaxed text-muted">
+          Mailstat reads message sizes and headers only, never bodies. The password is stored in
+          your system keychain.
         </p>
 
         <div className="mt-4 flex flex-wrap gap-1.5">
@@ -95,66 +91,66 @@ export default function AddAccountModal({ onClose, onAdd }: Props) {
               type="button"
               key={p.name}
               onClick={() => pickPreset(p)}
-              className={`rounded-full px-3 py-1 text-[12px] ${
+              className={`rounded-md px-3 py-1 text-xs ${
                 preset.name === p.name
-                  ? "bg-sky-700 text-white"
-                  : "bg-slate-800 text-slate-300 hover:bg-slate-700"
+                  ? "bg-accent font-medium text-white"
+                  : "border border-line text-muted hover:bg-raised hover:text-ink"
               }`}
             >
               {p.name}
             </button>
           ))}
         </div>
-        <p className="mt-2 min-h-8 text-[11px] leading-snug text-slate-500">{preset.hint}</p>
+        <p className="mt-2 min-h-8 text-[11px] leading-snug text-faint">{preset.hint}</p>
 
-        <label className="mt-2 block text-[12px] text-slate-300">
+        <label className="mt-2 block text-xs text-muted">
           Email address
           <input
             required
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="mt-1 w-full rounded border border-slate-700 bg-slate-800 px-2.5 py-1.5 text-[13px] text-slate-100 outline-none focus:border-sky-600"
+            className={inputClass}
             placeholder="you@example.com"
           />
         </label>
 
         <div className="mt-3 flex gap-2">
-          <label className="block flex-1 text-[12px] text-slate-300">
+          <label className="block flex-1 text-xs text-muted">
             IMAP server
             <input
               required
               value={host}
               onChange={(e) => setHost(e.target.value)}
-              className="mt-1 w-full rounded border border-slate-700 bg-slate-800 px-2.5 py-1.5 text-[13px] text-slate-100 outline-none focus:border-sky-600"
+              className={inputClass}
               placeholder="imap.example.com"
             />
           </label>
-          <label className="block w-20 text-[12px] text-slate-300">
+          <label className="block w-20 text-xs text-muted">
             Port
             <input
               required
               type="number"
               value={port}
               onChange={(e) => setPort(Number(e.target.value))}
-              className="mt-1 w-full rounded border border-slate-700 bg-slate-800 px-2.5 py-1.5 text-[13px] text-slate-100 outline-none focus:border-sky-600"
+              className={inputClass}
             />
           </label>
         </div>
 
-        <label className="mt-3 block text-[12px] text-slate-300">
+        <label className="mt-3 block text-xs text-muted">
           App password
           <input
             required
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="mt-1 w-full rounded border border-slate-700 bg-slate-800 px-2.5 py-1.5 text-[13px] text-slate-100 outline-none focus:border-sky-600"
+            className={inputClass}
           />
         </label>
 
         {error && (
-          <p className="mt-3 rounded border border-red-900 bg-red-950/60 px-2.5 py-1.5 text-[12px] text-red-300">
+          <p className="mt-3 rounded-md bg-danger-surface px-2.5 py-1.5 text-xs text-danger">
             {error}
           </p>
         )}
@@ -163,16 +159,16 @@ export default function AddAccountModal({ onClose, onAdd }: Props) {
           <button
             type="button"
             onClick={onClose}
-            className="rounded px-3 py-1.5 text-[13px] text-slate-300 hover:bg-slate-800"
+            className="rounded-md px-3 py-1.5 text-[13px] text-muted hover:bg-raised hover:text-ink"
           >
             Cancel
           </button>
           <button
             type="submit"
             disabled={busy}
-            className="rounded bg-sky-700 px-4 py-1.5 text-[13px] font-medium text-white hover:bg-sky-600 disabled:opacity-50"
+            className="rounded-md bg-accent px-4 py-1.5 text-[13px] font-medium text-white hover:bg-accent-strong disabled:opacity-60"
           >
-            {busy ? "Connecting…" : "Connect"}
+            {busy ? "Connecting" : "Connect"}
           </button>
         </div>
       </form>

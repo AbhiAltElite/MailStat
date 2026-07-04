@@ -203,6 +203,12 @@ fn get_type_stats(state: State<AppState>, account_id: i64) -> Result<Vec<TypeSta
 }
 
 #[tauri::command]
+fn get_message_detail(state: State<AppState>, message_id: i64) -> Result<MessageDetail, String> {
+    let conn = open_db(&state)?;
+    queries::message_detail(&conn, message_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn get_account_stats(state: State<AppState>, account_id: i64) -> Result<AccountStats, String> {
     let conn = open_db(&state)?;
     queries::account_stats(&conn, account_id).map_err(|e| e.to_string())
@@ -290,6 +296,7 @@ pub fn run() {
             get_largest_messages,
             get_type_stats,
             get_account_stats,
+            get_message_detail,
             ids_for_path,
             ids_for_senders,
             perform_action,

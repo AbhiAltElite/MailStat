@@ -75,6 +75,32 @@ pub struct MessageRow {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct AttachmentInfo {
+    pub filename: String,
+    pub mime: String,
+    pub ext: String,
+    pub size: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MessageDetail {
+    pub id: i64,
+    pub subject: String,
+    pub from_email: String,
+    pub from_name: String,
+    pub folder: String,
+    pub date: Option<i64>,
+    pub size: i64,
+    pub cat: String,
+    pub list_unsubscribe: Option<String>,
+    pub attachments: Vec<AttachmentInfo>,
+    /// Messages sharing the same normalized subject (the conversation).
+    pub thread: Vec<MessageRow>,
+    /// Other recent messages from the same sender.
+    pub from_sender: Vec<MessageRow>,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct TypeStat {
     pub cat: String,
     pub count: i64,

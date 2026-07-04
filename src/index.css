@@ -1,15 +1,91 @@
 @import "tailwindcss";
 
+/*
+  Design tokens. One neutral ramp, one accent, one danger tone.
+  Spacing follows the default 4pt Tailwind scale; radii are 6px for
+  controls (rounded-md) and 8px for overlays (rounded-lg) everywhere.
+*/
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-raised: var(--raised);
+  --color-line: var(--line);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-danger: var(--danger);
+  --color-danger-surface: var(--danger-surface);
+  --color-sel: var(--sel);
+}
+
+:root {
+  --canvas: #f4f6f8;
+  --surface: #ffffff;
+  --raised: #eaedf1;
+  --line: #dde3e9;
+  --ink: #1c2430;
+  --muted: #57636f;
+  --faint: #8a94a0;
+  --accent: #2f6fab;
+  --accent-strong: #275d90;
+  --danger: #b23b32;
+  --danger-surface: #f9edec;
+  --sel: #b8860b;
+
+  --tm-group-bg: #e4e8ee;
+  --tm-group-text: #57636f;
+}
+
+[data-theme="dark"] {
+  --canvas: #0e1217;
+  --surface: #151b23;
+  --raised: #1e2732;
+  --line: #293441;
+  --ink: #e7edf4;
+  --muted: #9ba8b6;
+  --faint: #6b7889;
+  --accent: #3f87c4;
+  --accent-strong: #5399d1;
+  --danger: #cf574b;
+  --danger-surface: #38201d;
+  --sel: #ffd166;
+
+  --tm-group-bg: #1b2430;
+  --tm-group-text: #9fb2c8;
+}
+
 html,
 body,
 #root {
   height: 100%;
   margin: 0;
   overflow: hidden;
-  background: #0d1219;
-  color: #dbe4ee;
-  font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   user-select: none;
+  color-scheme: light;
+}
+
+[data-theme="dark"] body,
+html[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+button {
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 ::-webkit-scrollbar {
@@ -17,9 +93,9 @@ body,
   height: 10px;
 }
 ::-webkit-scrollbar-thumb {
-  background: #2c3a4c;
+  background: var(--line);
   border-radius: 5px;
-  border: 2px solid #0d1219;
+  border: 2px solid var(--canvas);
 }
 ::-webkit-scrollbar-track {
   background: transparent;

@@ -11,7 +11,13 @@ interface Props {
   selectedKey: string | null;
   onSelect: (node: TreeNode | null) => void;
   onDrill: (node: TreeNode) => void;
+  onOpenMessage: (id: number) => void;
   highlightCat: string | null;
+  theme: "light" | "dark";
+}
+
+function cssVar(name: string): string {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 }
 
 interface Datum extends TreeNode {
@@ -20,7 +26,15 @@ interface Datum extends TreeNode {
 
 type RectNode = HierarchyRectangularNode<Datum>;
 
-export default function Treemap({ nodes, selectedKey, onSelect, onDrill, highlightCat }: Props) {
+export default function Treemap({
+  nodes,
+  selectedKey,
+  onSelect,
+  onDrill,
+  onOpenMessage,
+  highlightCat,
+  theme,
+}: Props) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [dims, setDims] = useState({ w: 0, h: 0 });
@@ -73,15 +87,19 @@ export default function Treemap({ nodes, selectedKey, onSelect, onDrill, highlig
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, dims.w, dims.h);
 
+    const groupBg = cssVar("--tm-group-bg");
+    const groupText = cssVar("--tm-group-text");
+    const outline = cssVar("--sel");
+
     // Group headers (depth 1 with children)
     for (const g of root.children ?? []) {
       if (!g.children) continue;
       const w = g.x1 - g.x0;
       const h = g.y1 - g.y0;
-      ctx.fillStyle = "#1b2430";
+      ctx.fillStyle = groupBg;
       ctx.fillRect(g.x0, g.y0, w, h);
       if (w > 40 && h > 18) {
-        ctx.fillStyle = "#9fb2c8";
+        ctx.fillStyle = groupText;
         ctx.font = "600 10px ui-sans-serif, system-ui";
         const label = `${g.data.label}  ·  ${formatBytes(g.data.size)}`;
         ctx.fillText(ellipsize(ctx, label, w - 10), g.x0 + 5, g.y0 + 11.5);
@@ -99,13 +117,16 @@ export default function Treemap({ nodes, selectedKey, onSelect, onDrill, highlig
         d.cat === "mixed" ? hashColor(d.key + d.label) : colorFor(d.cat);
       const dimmed = highlightCat && d.cat !== highlightCat;
       const grad = ctx.createLinearGradient(leaf.x0, leaf.y0, leaf.x0, leaf.y1);
-      grad.addColorStop(0, shade(base, dimmed ? -55 : 18));
-      grad.addColorStop(1, shade(base, dimmed ? -70 : -22));
+      grad.addColorStop(0, shade(base, 18));
+      grad.addColorStop(1, shade(base, -22));
+      ctx.globalAlpha = dimmed ? 0.18 : 1;
       ctx.fillStyle = grad;
       ctx.fillRect(leaf.x0, leaf.y0, w, h);
+      ctx.globalAlpha = 1;
+      if (dimmed) continue;
 
       if (selectedKey && keyPathOf(leaf) === selectedKey) {
-        ctx.strokeStyle = "#ffd166";
+        ctx.strokeStyle = outline;
         ctx.lineWidth = 2;
         ctx.strokeRect(leaf.x0 + 1, leaf.y0 + 1, w - 2, h - 2);
       }
@@ -126,13 +147,13 @@ export default function Treemap({ nodes, selectedKey, onSelect, onDrill, highlig
     if (selectedKey) {
       for (const g of root.children ?? []) {
         if (keyPathOf(g) === selectedKey) {
-          ctx.strokeStyle = "#ffd166";
+          ctx.strokeStyle = outline;
           ctx.lineWidth = 2;
           ctx.strokeRect(g.x0 + 1, g.y0 + 1, g.x1 - g.x0 - 2, g.y1 - g.y0 - 2);
         }
       }
     }
-  }, [root, dims, selectedKey, highlightCat]);
+  }, [root, dims, selectedKey, highlightCat, theme]);
 
   function hitTest(x: number, y: number): RectNode | null {
     if (!root) return null;
@@ -170,23 +191,26 @@ export default function Treemap({ nodes, selectedKey, onSelect, onDrill, highlig
         onDoubleClick={(e) => {
           const n = nodeAt(e);
           if (!n) return;
+          // A message tile opens the detail drawer; a group drills in.
+          if (n.data.key.startsWith("m:")) {
+            onOpenMessage(Number(n.data.key.slice(2)));
+            return;
+          }
           const top = topAncestor(n);
           if (top && !top.data.leaf && top.data.key !== "__other__") onDrill(top.data);
         }}
       />
       {hover && (
         <div
-          className="pointer-events-none absolute z-10 max-w-xs rounded border border-slate-600 bg-slate-900/95 px-2.5 py-1.5 text-xs shadow-lg"
+          className="pointer-events-none absolute z-10 max-w-xs rounded-md border border-line bg-surface px-2.5 py-1.5 text-xs shadow-lg"
           style={{
             left: Math.min(hover.x + 12, Math.max(dims.w - 240, 0)),
             top: Math.min(hover.y + 12, Math.max(dims.h - 70, 0)),
           }}
         >
-          <div className="font-medium text-slate-100">{hover.node.data.label || "(no subject)"}</div>
-          {hover.node.data.sublabel && (
-            <div className="text-slate-400">{hover.node.data.sublabel}</div>
-          )}
-          <div className="text-slate-300">
+          <div className="font-medium text-ink">{hover.node.data.label || "(no subject)"}</div>
+          {hover.node.data.sublabel && <div className="text-faint">{hover.node.data.sublabel}</div>}
+          <div className="text-muted">
             {formatBytes(hover.node.data.size)}
             {hover.node.data.count > 1 ? ` · ${hover.node.data.count.toLocaleString()} messages` : ""}
           </div>

@@ -70,6 +70,20 @@ fn top_lists_and_unsubscribe() {
 }
 
 #[test]
+fn message_detail_with_connections() {
+    let (conn, account_id) = setup();
+    let largest = queries::largest_messages(&conn, account_id, 1).unwrap().remove(0);
+    let detail = queries::message_detail(&conn, largest.id).unwrap();
+    assert_eq!(detail.id, largest.id);
+    assert_eq!(detail.size, largest.size);
+    assert!(!detail.attachments.is_empty(), "largest demo message should carry attachments");
+    assert!(detail.thread.iter().any(|m| m.id == largest.id), "thread includes the message itself");
+    assert!(!detail.from_sender.is_empty());
+    assert!(detail.from_sender.iter().all(|m| m.id != largest.id));
+    assert!(detail.from_sender.iter().all(|m| m.from_email == detail.from_email));
+}
+
+#[test]
 fn cleanup_action_on_demo_account() {
     let (mut conn, account_id) = setup();
     let before = queries::account_stats(&conn, account_id).unwrap();

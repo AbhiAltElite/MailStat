@@ -1,63 +1,107 @@
 # Mailstat
 
-**WinDirStat for your email.** See where the gigabytes in your mailbox live as an
-interactive treemap — then clean them up in bulk. Free, local-first, multi-provider.
+Mailstat is a mailbox space analyzer and cleanup assistant. It reads the metadata of
+every message in an email account, draws the mailbox as a treemap where tile area
+equals message size, and lets you archive or delete the heavy parts in bulk.
 
-## What it does
+It is free, open source, and local first. Message bodies are never downloaded and
+nothing is sent to any third party service.
 
-- **Treemap of your mailbox** — tile area = message size, grouped by
-  Folder → Sender, Sender, Year → Sender, or Type → Sender. Double-click to
-  drill in, click to select.
-- **Folder tree** with size/count/% bars (the WinDirStat directory panel).
-- **Content-type legend** — the email analogue of WinDirStat's extension list:
-  images, PDFs, archives, video… click to highlight in the treemap.
-- **Top lists** — heaviest senders, largest messages, unsubscribe candidates
-  (from `List-Unsubscribe` headers).
-- **Cleanup** — select a tile, a sender, or check rows in the lists, then
-  Archive / Move to Trash / Delete permanently. Always behind a confirmation
-  that shows exact message count and size.
-- **Scan is metadata-only**: sizes, envelopes, body *structure*, and one header
-  field. Message bodies are never downloaded. Everything stays in a local
-  SQLite cache; passwords live in the OS keychain.
+## Major features
 
-## Providers
+- Treemap of the whole mailbox, grouped by folder and sender, sender only,
+  year and sender, or content type and sender. Double click a group to drill in,
+  double click a message tile to open it.
+- Folder panel with size, message count, and share bars.
+- Content type list showing where the bytes sit: images, PDFs, archives, video,
+  spreadsheets, presentations, plain mail. Selecting a type highlights it in the
+  treemap.
+- Top lists: heaviest senders, largest messages, and unsubscribe candidates taken
+  from List-Unsubscribe headers.
+- Message detail view with attachments, the surrounding conversation, and other
+  large mail from the same sender, so related messages are one click away.
+- Cleanup actions: Archive, Move to Trash, and permanent delete. Every action shows
+  the exact message count and total size before it runs.
+- Light and dark themes.
+- Incremental rescans. Only new messages are fetched on subsequent scans, and
+  messages removed on the server are removed from the local cache.
 
-- **Any IMAP server** (TLS, port 993) — Gmail, iCloud, Fastmail, Yahoo,
-  self-hosted. Gmail/iCloud/Yahoo need an app password (built-in presets
-  explain where to create one).
-- Gmail is scanned via `[Gmail]/All Mail` + Trash + Spam so labels don't
-  double-count messages.
-- A **Gmail API connector** (faster scans, label-aware) is planned as
-  bring-your-own-OAuth-client, since publishing a verified Gmail-API app
-  requires a paid security assessment — this project stays free.
+## Privacy
 
-## Run it
+Scanning fetches message sizes, envelopes, body structure, and the
+List-Unsubscribe header. It never fetches message bodies. All data is cached in a
+local SQLite database in the application data directory. Account passwords are
+stored in the operating system keychain, not in the database. There is no
+telemetry.
+
+## Supported providers
+
+Any IMAP server with TLS on port 993. Built-in presets cover Gmail, iCloud,
+Fastmail, and Yahoo, all of which require an app password:
+
+- Gmail: enable 2-step verification, then create a password at
+  myaccount.google.com/apppasswords
+- iCloud: create an app-specific password at appleid.apple.com
+- Fastmail: Settings, Privacy and Security, app passwords
+- Yahoo: Account Security settings, app passwords
+
+Gmail accounts are scanned through All Mail, Trash, and Spam so that labels do not
+count the same message twice.
+
+A Gmail API connector with label support is planned. It will use a bring your own
+OAuth client model, because publishing a verified app for restricted Gmail scopes
+requires a paid security assessment, and this project intends to stay free.
+
+## Building
+
+Prerequisites: Rust (rustup.rs) and Node.js 20 or newer.
 
 ```sh
-# prerequisites: Rust (rustup), Node 20+
+git clone https://github.com/<your-user>/mailstat.git
+cd mailstat
 npm install
-npm run tauri dev      # desktop app
-npm run dev            # UI only in a browser, with an in-memory mock backend
+npm run tauri dev      # run the desktop app
+npm run tauri build    # produce a release bundle
 ```
 
-No account handy? Click **“Try with demo data”** on the welcome screen.
+`npm run dev` serves the interface in a plain browser with an in-memory mock
+backend, which is useful for interface work and demos. IMAP accounts require the
+desktop app.
+
+If you just want to look around, start the app and choose "Try with demo data".
 
 ## Tests
 
 ```sh
-cd src-tauri && cargo test   # metadata parsing + data-layer integration tests
+cd src-tauri && cargo test   # parsing and data layer tests
 npx tsc --noEmit             # frontend type check
 ```
 
-## Architecture
+## Roadmap
 
-```
-React + Vite + Tailwind          Rust (Tauri 2)
-  treemap canvas (d3-hierarchy)    IMAP scan engine (metadata-only, resumable)
-  folder tree · top lists          SQLite cache + SQL aggregation
-  cleanup basket + confirm         action executor (MOVE / COPY+EXPUNGE)
-                                   keychain secrets (keyring)
-```
+- Gmail API connector (bring your own OAuth client)
+- Microsoft 365 support through Graph
+- Duplicate and near-duplicate detection
+- Saved cleanup rules, for example newsletters older than one year
+- Signed release builds for macOS, Windows, and Linux
 
-Scans are incremental (UIDVALIDITY/UIDNEXT), cancellable, and stream progress
-events to the UI. Remote deletions are reconciled via `UID SEARCH ALL`.
+## Copyright and licenses
+
+Mailstat is distributed under the MIT license. See [LICENSE](LICENSE).
+
+Mailstat contains no code from WinDirStat or any other disk usage analyzer. The
+treemap is an independent implementation built on the squarified treemap layout
+from d3-hierarchy (ISC license). All other dependencies are available under MIT,
+Apache 2.0, or ISC licenses.
+
+## Acknowledgements
+
+The idea of pairing a treemap with a cleanup workflow was popularized by
+WinDirStat, KDirStat, and SequoiaView for disk usage. Mailstat applies the same
+idea to mailboxes. It is an independent project and is not affiliated with or
+endorsed by any of them.
+
+## Contributing
+
+Issues and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for
+how to get a development environment running and what to check before submitting.

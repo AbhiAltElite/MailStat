@@ -163,6 +163,30 @@ pub fn collect_attachments(bs: &BodyStructure<'_>, out: &mut Vec<AttachmentMeta>
     }
 }
 
+/// Normalize a subject for threading: strip reply/forward prefixes,
+/// lowercase, and collapse whitespace.
+pub fn normalize_subject(s: &str) -> String {
+    let mut t = s.trim();
+    loop {
+        let lower = t.to_ascii_lowercase();
+        let mut next = None;
+        for p in ["re:", "fw:", "fwd:", "aw:", "sv:"] {
+            if lower.starts_with(p) {
+                next = Some(t[p.len()..].trim_start());
+                break;
+            }
+        }
+        match next {
+            Some(rest) => t = rest,
+            None => break,
+        }
+    }
+    t.to_ascii_lowercase()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// Classify a mailbox path into a special role, if any.
 pub fn special_of(path: &str) -> Option<&'static str> {
     let p = path.to_ascii_lowercase();
@@ -240,6 +264,14 @@ mod tests {
         ];
         assert_eq!(message_category(&atts), "archive");
         assert_eq!(message_category(&[]), "plain");
+    }
+
+    #[test]
+    fn subject_normalization() {
+        assert_eq!(normalize_subject("Re: RE: Fwd: Budget  plan "), "budget plan");
+        assert_eq!(normalize_subject("Budget plan"), "budget plan");
+        assert_eq!(normalize_subject("  "), "");
+        assert_eq!(normalize_subject("Recap notes"), "recap notes");
     }
 
     #[test]

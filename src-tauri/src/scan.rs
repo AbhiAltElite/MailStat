@@ -101,8 +101,8 @@ fn insert_batch(
     let tx = conn.transaction()?;
     {
         let mut ins_msg = tx.prepare_cached(
-            "INSERT INTO messages (account_id, folder_id, uid, subject, from_email, from_name, date, size, has_attachments, type_cat, list_unsubscribe) \
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11) \
+            "INSERT INTO messages (account_id, folder_id, uid, subject, from_email, from_name, date, size, has_attachments, type_cat, list_unsubscribe, norm_subject) \
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12) \
              ON CONFLICT(folder_id, uid) DO UPDATE SET size=excluded.size",
         )?;
         let mut ins_att = tx.prepare_cached(
@@ -121,6 +121,7 @@ fn insert_batch(
                 !m.attachments.is_empty(),
                 message_category(&m.attachments),
                 m.list_unsubscribe,
+                crate::mailmeta::normalize_subject(&m.subject),
             ])?;
             let msg_id = tx.last_insert_rowid();
             for a in &m.attachments {

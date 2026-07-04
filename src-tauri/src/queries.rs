@@ -368,6 +368,126 @@ pub fn type_stats(conn: &Connection, account_id: i64) -> rusqlite::Result<Vec<Ty
     Ok(rows)
 }
 
+fn message_rows(
+    conn: &Connection,
+    sql: &str,
+    params: &[Value],
+) -> rusqlite::Result<Vec<MessageRow>> {
+    let mut stmt = conn.prepare(sql)?;
+    let rows = stmt
+        .query_map(params_from_iter(params.iter()), |r| {
+            Ok(MessageRow {
+                id: r.get(0)?,
+                subject: r.get(1)?,
+                from_email: r.get(2)?,
+                from_name: r.get(3)?,
+                folder: r.get(4)?,
+                date: r.get(5)?,
+                size: r.get(6)?,
+                cat: r.get(7)?,
+            })
+        })?
+        .collect::<Result<_, _>>()?;
+    Ok(rows)
+}
+
+const MSG_ROW_COLS: &str = "m.id, m.subject, m.from_email, m.from_name, f.name, m.date, m.size, m.type_cat";
+
+/// Everything the detail drawer needs for one message, including its
+/// conversation (same normalized subject) and other mail from the sender.
+pub fn message_detail(conn: &Connection, message_id: i64) -> rusqlite::Result<MessageDetail> {
+    let (account_id, norm_subject, list_unsubscribe, row): (i64, String, Option<String>, MessageRow) =
+        conn.query_row(
+            &format!(
+                "SELECT m.account_id, m.norm_subject, m.list_unsubscribe, {MSG_ROW_COLS} \
+                 FROM messages m JOIN folders f ON f.id = m.folder_id WHERE m.id = ?1"
+            ),
+            rusqlite::params![message_id],
+            |r| {
+                Ok((
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    MessageRow {
+                        id: r.get(3)?,
+                        subject: r.get(4)?,
+                        from_email: r.get(5)?,
+                        from_name: r.get(6)?,
+                        folder: r.get(7)?,
+                        date: r.get(8)?,
+                        size: r.get(9)?,
+                        cat: r.get(10)?,
+                    },
+                ))
+            },
+        )?;
+
+    let mut stmt = conn.prepare(
+        "SELECT filename, mime, ext, size FROM attachments WHERE message_id = ?1 ORDER BY size DESC",
+    )?;
+    let attachments = stmt
+        .query_map(rusqlite::params![message_id], |r| {
+            Ok(AttachmentInfo {
+                filename: r.get(0)?,
+                mime: r.get(1)?,
+                ext: r.get(2)?,
+                size: r.get(3)?,
+            })
+        })?
+        .collect::<Result<_, _>>()?;
+
+    let thread = if norm_subject.is_empty() {
+        vec![]
+    } else {
+        // A window of the conversation centered on this message, so the
+        // message itself is always present even in very long threads.
+        let mut rows = message_rows(
+            conn,
+            &format!(
+                "SELECT {MSG_ROW_COLS} FROM messages m JOIN folders f ON f.id = m.folder_id \
+                 WHERE m.account_id = ? AND m.norm_subject = ? \
+                 ORDER BY ABS(COALESCE(m.date, 0) - ?) ASC LIMIT 30"
+            ),
+            &[
+                Value::Integer(account_id),
+                Value::Text(norm_subject.clone()),
+                Value::Integer(row.date.unwrap_or(0)),
+            ],
+        )?;
+        rows.sort_by_key(|m| m.date.unwrap_or(0));
+        rows
+    };
+
+    let from_sender = message_rows(
+        conn,
+        &format!(
+            "SELECT {MSG_ROW_COLS} FROM messages m JOIN folders f ON f.id = m.folder_id \
+             WHERE m.account_id = ? AND m.from_email = ? AND m.id != ? \
+             ORDER BY m.size DESC LIMIT 15"
+        ),
+        &[
+            Value::Integer(account_id),
+            Value::Text(row.from_email.clone()),
+            Value::Integer(message_id),
+        ],
+    )?;
+
+    Ok(MessageDetail {
+        id: row.id,
+        subject: row.subject,
+        from_email: row.from_email,
+        from_name: row.from_name,
+        folder: row.folder,
+        date: row.date,
+        size: row.size,
+        cat: row.cat,
+        list_unsubscribe,
+        attachments,
+        thread,
+        from_sender,
+    })
+}
+
 pub fn account_stats(conn: &Connection, account_id: i64) -> rusqlite::Result<AccountStats> {
     let (msg_count, total_size): (i64, i64) = conn.query_row(
         "SELECT COUNT(*), COALESCE(SUM(size),0) FROM messages WHERE account_id = ?1",

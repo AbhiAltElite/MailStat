@@ -49,6 +49,7 @@ pub fn init(conn: &Connection) -> rusqlite::Result<()> {
             has_attachments INTEGER NOT NULL DEFAULT 0,
             type_cat TEXT NOT NULL DEFAULT 'plain',
             list_unsubscribe TEXT,
+            norm_subject TEXT NOT NULL DEFAULT '',
             UNIQUE(folder_id, uid)
         );
         CREATE INDEX IF NOT EXISTS idx_messages_account ON messages(account_id);
@@ -65,6 +66,14 @@ pub fn init(conn: &Connection) -> rusqlite::Result<()> {
         );
         CREATE INDEX IF NOT EXISTS idx_attachments_message ON attachments(message_id);
         "#,
+    )?;
+    // Databases created before the threading column existed.
+    let _ = conn.execute(
+        "ALTER TABLE messages ADD COLUMN norm_subject TEXT NOT NULL DEFAULT ''",
+        [],
+    );
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_messages_thread ON messages(account_id, norm_subject);",
     )
 }
 

@@ -86,8 +86,8 @@ pub fn seed(conn: &mut Connection) -> Result<i64, String> {
     {
         let mut ins_msg = tx
             .prepare(
-                "INSERT INTO messages (account_id, folder_id, uid, subject, from_email, from_name, date, size, has_attachments, type_cat, list_unsubscribe) \
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+                "INSERT INTO messages (account_id, folder_id, uid, subject, from_email, from_name, date, size, has_attachments, type_cat, list_unsubscribe, norm_subject) \
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
             )
             .map_err(|e| e.to_string())?;
         let mut ins_att = tx
@@ -138,7 +138,8 @@ pub fn seed(conn: &mut Connection) -> Result<i64, String> {
                 ins_msg
                     .execute(params![
                         account_id, folder_id, uid, subject, s.email, s.name, date, size,
-                        !atts.is_empty(), cat, unsub
+                        !atts.is_empty(), cat, unsub,
+                        crate::mailmeta::normalize_subject(subject)
                     ])
                     .map_err(|e| e.to_string())?;
                 let mid = tx.last_insert_rowid();

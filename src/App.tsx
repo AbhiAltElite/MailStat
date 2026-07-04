@@ -6,6 +6,7 @@ import {
   isTauri,
   type Account,
   type FolderInfo,
+  type MessageDetail as Detail,
   type MessageRow,
   type NewAccount,
   type PathSeg,
@@ -21,15 +22,25 @@ import TypeLegend from "./components/TypeLegend";
 import TopPanel, { type TopTab } from "./components/TopPanel";
 import AddAccountModal from "./components/AddAccountModal";
 import ConfirmDialog, { type PendingAction } from "./components/ConfirmDialog";
+import MessageDetail from "./components/MessageDetail";
 
 const GROUPINGS: { id: string; label: string; dims: string[] }[] = [
-  { id: "folder-sender", label: "Folder → Sender", dims: ["folder", "sender"] },
+  { id: "folder-sender", label: "Folder, then sender", dims: ["folder", "sender"] },
   { id: "sender", label: "Sender", dims: ["sender"] },
-  { id: "year-sender", label: "Year → Sender", dims: ["year", "sender"] },
-  { id: "type-sender", label: "Type → Sender", dims: ["type", "sender"] },
+  { id: "year-sender", label: "Year, then sender", dims: ["year", "sender"] },
+  { id: "type-sender", label: "Type, then sender", dims: ["type", "sender"] },
 ];
 
+type Theme = "light" | "dark";
+
+function initialTheme(): Theme {
+  const stored = localStorage.getItem("mailstat-theme");
+  if (stored === "light" || stored === "dark") return stored;
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
 export default function App() {
+  const [theme, setTheme] = useState<Theme>(initialTheme);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [accountId, setAccountId] = useState<number | null>(null);
   const [folders, setFolders] = useState<FolderInfo[]>([]);
@@ -50,8 +61,15 @@ export default function App() {
   const [pending, setPending] = useState<PendingAction | null>(null);
   const [actionBusy, setActionBusy] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [detailId, setDetailId] = useState<number | null>(null);
+  const [dataLoading, setDataLoading] = useState(false);
 
   const account = accounts.find((a) => a.id === accountId) ?? null;
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem("mailstat-theme", theme);
+  }, [theme]);
 
   const notify = useCallback((msg: string) => {
     setToast(msg);
@@ -66,18 +84,23 @@ export default function App() {
 
   const refreshData = useCallback(async () => {
     if (accountId == null) return;
-    const [f, t, s, l, u] = await Promise.all([
-      api.getFolders(accountId),
-      api.typeStats(accountId),
-      api.topSenders(accountId, 200),
-      api.largestMessages(accountId, 200),
-      api.unsubscribeCandidates(accountId, 200),
-    ]);
-    setFolders(f);
-    setTypeStats(t);
-    setSenders(s);
-    setLargest(l);
-    setUnsub(u);
+    setDataLoading(true);
+    try {
+      const [f, t, s, l, u] = await Promise.all([
+        api.getFolders(accountId),
+        api.typeStats(accountId),
+        api.topSenders(accountId, 200),
+        api.largestMessages(accountId, 200),
+        api.unsubscribeCandidates(accountId, 200),
+      ]);
+      setFolders(f);
+      setTypeStats(t);
+      setSenders(s);
+      setLargest(l);
+      setUnsub(u);
+    } finally {
+      setDataLoading(false);
+    }
   }, [accountId]);
 
   const refreshTreemap = useCallback(async () => {
@@ -93,6 +116,7 @@ export default function App() {
     setSelected(null);
     setCheckedSenders(new Set());
     setCheckedMessages(new Set());
+    setDetailId(null);
   }, [accountId, grouping.id]);
   useEffect(() => {
     refreshData();
@@ -146,6 +170,12 @@ export default function App() {
     setDrillPath([...drillPath, { dim, key: node.key, label: node.label }]);
   };
 
+  const focusSender = (email: string, name: string) => {
+    setDetailId(null);
+    setGrouping(GROUPINGS[1]);
+    setTimeout(() => setDrillPath([{ dim: "sender", key: email, label: name }]), 0);
+  };
+
   const folderSelect = (f: FolderInfo | null) => {
     setSelected(null);
     if (!f) {
@@ -156,12 +186,11 @@ export default function App() {
       setDrillPath([{ dim: "folder", key: String(f.id), label: f.name }]);
     } else {
       setGrouping(GROUPINGS[0]);
-      // grouping change resets path; set it on next tick semantics via state below
       setTimeout(() => setDrillPath([{ dim: "folder", key: String(f.id), label: f.name }]), 0);
     }
   };
 
-  // ---- cleanup actions ----------------------------------------------------
+  // Cleanup actions -----------------------------------------------------------
 
   const requestNodeAction = async (action: PendingAction["action"]) => {
     if (accountId == null || !selected || selected.key === "__other__") return;
@@ -181,24 +210,42 @@ export default function App() {
     }
     if (checkedMessages.size) {
       ids = [...new Set([...ids, ...checkedMessages])];
-      what = what ? `${what} + ${checkedMessages.size} messages` : `${checkedMessages.size} messages`;
+      what = what
+        ? `${what} and ${checkedMessages.size} messages`
+        : `${checkedMessages.size} messages`;
     }
     if (!ids.length) return;
-    const bytes = largest.filter((m) => checkedMessages.has(m.id)).reduce((a, m) => a + m.size, 0);
-    setPending({ action, ids, bytes: bytes || senderBytes(), what });
+    const msgBytes = largest
+      .filter((m) => checkedMessages.has(m.id))
+      .reduce((a, m) => a + m.size, 0);
+    const senderBytes = senders
+      .filter((s) => checkedSenders.has(s.email))
+      .reduce((a, s) => a + s.size, 0);
+    setPending({ action, ids, bytes: msgBytes + senderBytes, what });
   };
 
-  const senderBytes = () =>
-    senders.filter((s) => checkedSenders.has(s.email)).reduce((a, s) => a + s.size, 0);
+  const requestDetailAction = (action: PendingAction["action"], detail: Detail) => {
+    setDetailId(null);
+    setPending({
+      action,
+      ids: [detail.id],
+      bytes: detail.size,
+      what: detail.subject || "(no subject)",
+    });
+  };
 
   const confirmAction = async () => {
     if (!pending || accountId == null) return;
     setActionBusy(true);
     try {
       const res = await api.performAction(accountId, pending.ids, pending.action);
-      notify(
-        `${pending.action === "archive" ? "Archived" : pending.action === "trash" ? "Moved to Trash" : "Deleted"} ${formatCount(res.affected)} messages · ${formatBytes(res.bytes)}`,
-      );
+      const verb =
+        pending.action === "archive"
+          ? "Archived"
+          : pending.action === "trash"
+            ? "Moved to Trash"
+            : "Deleted";
+      notify(`${verb} ${formatCount(res.affected)} messages, ${formatBytes(res.bytes)}`);
       setPending(null);
       setSelected(null);
       setCheckedSenders(new Set());
@@ -214,10 +261,9 @@ export default function App() {
   };
 
   const openUnsubscribe = async (raw: string) => {
-    // List-Unsubscribe: <https://...>, <mailto:...> — prefer the https target.
     const targets = [...raw.matchAll(/<([^>]+)>/g)].map((m) => m[1]);
     const url = targets.find((t) => t.startsWith("http")) ?? targets[0];
-    if (!url) return notify("No unsubscribe link in header");
+    if (!url) return notify("No unsubscribe link in this header");
     if (isTauri) await openUrl(url);
     else window.open(url, "_blank");
   };
@@ -227,36 +273,48 @@ export default function App() {
   const selectionActive = (selected && selected.key !== "__other__") || anyChecked;
 
   const breadcrumb = useMemo(
-    () => [{ label: account?.label ?? "", path: [] as PathSeg[] }].concat(
-      drillPath.map((seg, i) => ({
-        label: seg.label ?? seg.key,
-        path: drillPath.slice(0, i + 1),
-      })),
-    ),
+    () =>
+      [{ label: account?.label ?? "", path: [] as PathSeg[] }].concat(
+        drillPath.map((seg, i) => ({
+          label: seg.label ?? seg.key,
+          path: drillPath.slice(0, i + 1),
+        })),
+      ),
     [drillPath, account],
   );
 
-  // ---- empty states -------------------------------------------------------
+  const themeToggle = (
+    <button
+      onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+      className="rounded-md border border-line px-3 py-1 text-xs text-muted hover:bg-raised hover:text-ink"
+      aria-label="Toggle color theme"
+    >
+      {theme === "dark" ? "Light theme" : "Dark theme"}
+    </button>
+  );
+
+  // Welcome state -------------------------------------------------------------
 
   if (!accounts.length) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-4">
-        <h1 className="text-2xl font-semibold text-slate-100">Mailstat</h1>
-        <p className="max-w-md text-center text-[14px] leading-relaxed text-slate-400">
-          WinDirStat for your email. Connect a mailbox over IMAP and see where the
-          gigabytes live — then clean them up. Only sizes and headers are read; your
-          messages never leave this machine.
+      <div className="relative flex h-full flex-col items-center justify-center gap-5 px-6">
+        <div className="absolute top-4 right-4">{themeToggle}</div>
+        <h1 className="text-2xl font-semibold tracking-tight text-ink">Mailstat</h1>
+        <p className="max-w-md text-center text-sm leading-relaxed text-muted">
+          Mailstat maps every message in your mailbox as a treemap, so the space hogs stand out
+          at a glance. Connect over IMAP, find the heavy senders and attachments, and clean up
+          in bulk. Only sizes and headers are read. Nothing leaves this machine.
         </p>
         <div className="flex gap-3">
           <button
             onClick={() => setShowAdd(true)}
-            className="rounded bg-sky-700 px-5 py-2 text-[14px] font-medium text-white hover:bg-sky-600"
+            className="rounded-md bg-accent px-5 py-2 text-sm font-medium text-white hover:bg-accent-strong"
           >
             Connect account
           </button>
           <button
             onClick={startDemo}
-            className="rounded bg-slate-800 px-5 py-2 text-[14px] text-slate-200 hover:bg-slate-700"
+            className="rounded-md border border-line px-5 py-2 text-sm text-ink hover:bg-raised"
           >
             Try with demo data
           </button>
@@ -267,15 +325,17 @@ export default function App() {
     );
   }
 
+  // Main layout ----------------------------------------------------------------
+
   return (
     <div className="flex h-full flex-col">
-      {/* Header */}
-      <header className="flex items-center gap-3 border-b border-slate-800 px-3 py-2">
-        <span className="text-[14px] font-semibold tracking-tight text-slate-100">Mailstat</span>
+      <header className="flex items-center gap-3 border-b border-line bg-surface px-3 py-2">
+        <span className="text-sm font-semibold tracking-tight text-ink">Mailstat</span>
         <select
           value={accountId ?? undefined}
           onChange={(e) => setAccountId(Number(e.target.value))}
-          className="rounded border border-slate-700 bg-slate-800 px-2 py-1 text-[12px] text-slate-200"
+          className="rounded-md border border-line bg-canvas px-2 py-1 text-xs text-ink"
+          aria-label="Account"
         >
           {accounts.map((a) => (
             <option key={a.id} value={a.id}>
@@ -286,7 +346,8 @@ export default function App() {
         <select
           value={grouping.id}
           onChange={(e) => setGrouping(GROUPINGS.find((g) => g.id === e.target.value)!)}
-          className="rounded border border-slate-700 bg-slate-800 px-2 py-1 text-[12px] text-slate-200"
+          className="rounded-md border border-line bg-canvas px-2 py-1 text-xs text-ink"
+          aria-label="Group treemap by"
         >
           {GROUPINGS.map((g) => (
             <option key={g.id} value={g.id}>
@@ -299,40 +360,43 @@ export default function App() {
           (scan ? (
             <button
               onClick={() => accountId != null && api.cancelScan(accountId)}
-              className="rounded bg-amber-800 px-3 py-1 text-[12px] text-amber-100 hover:bg-amber-700"
+              className="rounded-md border border-line px-3 py-1 text-xs text-muted hover:bg-raised hover:text-ink"
             >
               Cancel scan
             </button>
           ) : (
             <button
-              onClick={() => accountId != null && api.startScan(accountId).catch((e) => notify(String(e)))}
-              className="rounded bg-slate-800 px-3 py-1 text-[12px] text-slate-200 hover:bg-slate-700"
+              onClick={() =>
+                accountId != null && api.startScan(accountId).catch((e) => notify(String(e)))
+              }
+              className="rounded-md border border-line px-3 py-1 text-xs text-muted hover:bg-raised hover:text-ink"
             >
               Rescan
             </button>
           ))}
         <button
           onClick={() => setShowAdd(true)}
-          className="rounded bg-slate-800 px-3 py-1 text-[12px] text-slate-200 hover:bg-slate-700"
+          className="rounded-md border border-line px-3 py-1 text-xs text-muted hover:bg-raised hover:text-ink"
         >
-          + Account
+          Add account
         </button>
 
         <div className="flex-1" />
         {account && (
-          <span className="text-[12px] tabular-nums text-slate-400">
+          <span className="text-xs tabular-nums text-muted">
             {formatCount(account.msg_count)} messages · {formatBytes(account.total_size)}
           </span>
         )}
+        {themeToggle}
       </header>
 
-      {/* Scan progress */}
       {scan && (
-        <div className="border-b border-slate-800 bg-slate-900/70 px-3 py-1.5">
-          <div className="flex items-center justify-between text-[11px] text-slate-400">
+        <div className="border-b border-line bg-surface px-3 py-1.5">
+          <div className="flex items-center justify-between text-[11px] text-muted">
             <span>
-              Scanning {scan.folder} ({scan.folder_index + 1}/{scan.folder_count}) ·{" "}
-              {formatCount(Number(scan.messages_total))} messages · {formatBytes(Number(scan.bytes_total))}
+              Scanning {scan.folder} ({scan.folder_index + 1} of {scan.folder_count}),{" "}
+              {formatCount(Number(scan.messages_total))} messages,{" "}
+              {formatBytes(Number(scan.bytes_total))} so far
             </span>
             <span>
               {scan.total_in_folder
@@ -340,9 +404,9 @@ export default function App() {
                 : ""}
             </span>
           </div>
-          <div className="mt-1 h-1 rounded bg-slate-800">
+          <div className="mt-1 h-1 rounded-full bg-raised">
             <div
-              className="h-1 rounded bg-sky-500 transition-all"
+              className="h-1 rounded-full bg-accent transition-all"
               style={{
                 width: `${scan.total_in_folder ? (scan.done_in_folder / scan.total_in_folder) * 100 : 0}%`,
               }}
@@ -351,62 +415,69 @@ export default function App() {
         </div>
       )}
 
-      {/* Body */}
       <div className="flex min-h-0 flex-1">
-        {/* Left: folders */}
-        <aside className="w-60 shrink-0 overflow-y-auto border-r border-slate-800 p-2">
-          <p className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+        <aside className="w-60 shrink-0 overflow-y-auto border-r border-line bg-surface p-2">
+          <p className="px-2 pb-1 text-[11px] font-semibold tracking-wider text-faint uppercase">
             Folders
           </p>
           <FolderTree
             folders={folders}
             selectedId={drillPath[0]?.dim === "folder" ? Number(drillPath[0].key) : null}
             onSelect={folderSelect}
+            loading={dataLoading && !folders.length}
           />
-          <p className="px-2 pb-1 pt-4 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+          <p className="px-2 pt-4 pb-1 text-[11px] font-semibold tracking-wider text-faint uppercase">
             Content types
           </p>
           <TypeLegend stats={typeStats} highlight={highlightCat} onHighlight={setHighlightCat} />
         </aside>
 
-        {/* Center: treemap */}
         <main className="flex min-w-0 flex-1 flex-col">
-          <div className="flex items-center gap-1 border-b border-slate-800 px-2 py-1 text-[12px]">
+          <div className="flex items-center gap-1 border-b border-line bg-surface px-2 py-1 text-xs">
             {breadcrumb.map((b, i) => (
               <span key={i} className="flex items-center gap-1">
-                {i > 0 && <span className="text-slate-600">/</span>}
+                {i > 0 && <span className="text-faint">/</span>}
                 <button
                   onClick={() => {
                     setSelected(null);
                     setDrillPath(b.path);
                   }}
-                  className={`rounded px-1.5 py-0.5 ${
+                  className={`rounded-md px-1.5 py-0.5 ${
                     i === breadcrumb.length - 1
-                      ? "text-slate-100"
-                      : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"
+                      ? "font-medium text-ink"
+                      : "text-muted hover:bg-raised hover:text-ink"
                   }`}
                 >
                   {b.label}
                 </button>
               </span>
             ))}
-            <span className="ml-2 text-[11px] text-slate-600">
-              double-click to drill in · click to select
+            <span className="ml-2 text-[11px] text-faint">
+              Click to select. Double-click a group to drill in, a message to open it.
             </span>
           </div>
           <div className="min-h-0 flex-1">
-            <Treemap
-              nodes={nodes}
-              selectedKey={selected?.key ?? null}
-              onSelect={setSelected}
-              onDrill={drillTo}
-              highlightCat={highlightCat}
-            />
+            {nodes.length === 0 && dataLoading ? (
+              <div className="grid h-full grid-cols-3 gap-1 p-1" aria-busy="true">
+                {[...Array(6)].map((_, i) => (
+                  <div key={i} className="animate-pulse rounded-md bg-raised" />
+                ))}
+              </div>
+            ) : (
+              <Treemap
+                nodes={nodes}
+                selectedKey={selected?.key ?? null}
+                onSelect={setSelected}
+                onDrill={drillTo}
+                onOpenMessage={setDetailId}
+                highlightCat={highlightCat}
+                theme={theme}
+              />
+            )}
           </div>
         </main>
 
-        {/* Right: top lists */}
-        <aside className="w-80 shrink-0 border-l border-slate-800">
+        <aside className="w-80 shrink-0 border-l border-line bg-surface">
           <TopPanel
             tab={tab}
             onTab={setTab}
@@ -432,39 +503,47 @@ export default function App() {
               })
             }
             onOpenUnsubscribe={openUnsubscribe}
-            onFocusSender={(email, name) => {
-              setGrouping(GROUPINGS[1]);
-              setTimeout(() => setDrillPath([{ dim: "sender", key: email, label: name }]), 0);
-            }}
+            onFocusSender={focusSender}
+            onOpenMessage={setDetailId}
+            loading={dataLoading && !senders.length}
           />
         </aside>
       </div>
 
-      {/* Selection / action bar */}
       {selectionActive && (
-        <footer className="flex items-center gap-3 border-t border-slate-800 bg-slate-900 px-3 py-2">
-          <span className="min-w-0 flex-1 truncate text-[12px] text-slate-300">
+        <footer className="flex items-center gap-2 border-t border-line bg-surface px-3 py-2">
+          <span className="min-w-0 flex-1 truncate text-xs text-muted">
             {selected && selected.key !== "__other__"
-              ? `Selected: ${selected.label} — ${formatCount(selected.count)} messages · ${formatBytes(selected.size)}`
+              ? `Selected: ${selected.label}, ${formatCount(selected.count)} messages, ${formatBytes(selected.size)}`
               : `Checked: ${checkedSenders.size} senders, ${checkedMessages.size} messages`}
           </span>
+          {selected?.key.startsWith("m:") && (
+            <button
+              onClick={() => setDetailId(Number(selected.key.slice(2)))}
+              className="rounded-md border border-line px-3 py-1.5 text-xs font-medium text-ink hover:bg-raised"
+            >
+              Details
+            </button>
+          )}
           {(["archive", "trash", "delete"] as const).map((action) => {
             if (action === "archive" && account?.kind === "imap" && !hasArchive) return null;
             const run = () =>
               selected && selected.key !== "__other__"
                 ? requestNodeAction(action)
                 : requestCheckedAction(action);
+            const label =
+              action === "trash" ? "Move to Trash" : action === "archive" ? "Archive" : "Delete";
             const styles =
               action === "delete"
-                ? "bg-red-900/70 text-red-200 hover:bg-red-800"
-                : "bg-slate-800 text-slate-200 hover:bg-slate-700";
+                ? "bg-danger-surface text-danger hover:opacity-85"
+                : "border border-line text-ink hover:bg-raised";
             return (
               <button
                 key={action}
                 onClick={run}
-                className={`rounded px-3 py-1.5 text-[12px] font-medium capitalize ${styles}`}
+                className={`rounded-md px-3 py-1.5 text-xs font-medium ${styles}`}
               >
-                {action === "trash" ? "Move to Trash" : action}
+                {label}
               </button>
             );
           })}
@@ -474,7 +553,7 @@ export default function App() {
               setCheckedSenders(new Set());
               setCheckedMessages(new Set());
             }}
-            className="rounded px-2 py-1.5 text-[12px] text-slate-400 hover:bg-slate-800"
+            className="rounded-md px-2 py-1.5 text-xs text-muted hover:bg-raised hover:text-ink"
           >
             Clear
           </button>
@@ -490,6 +569,16 @@ export default function App() {
           onCancel={() => setPending(null)}
         />
       )}
+      {detailId != null && (
+        <MessageDetail
+          messageId={detailId}
+          onClose={() => setDetailId(null)}
+          onNavigate={setDetailId}
+          onAction={requestDetailAction}
+          onShowSender={focusSender}
+          onUnsubscribe={openUnsubscribe}
+        />
+      )}
       {toast && <Toast msg={toast} />}
     </div>
   );
@@ -497,7 +586,10 @@ export default function App() {
 
 function Toast({ msg }: { msg: string }) {
   return (
-    <div className="fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-lg border border-slate-700 bg-slate-800 px-4 py-2 text-[13px] text-slate-100 shadow-xl">
+    <div
+      role="status"
+      className="fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-lg border border-line bg-surface px-4 py-2 text-[13px] text-ink shadow-xl"
+    >
       {msg}
     </div>
   );

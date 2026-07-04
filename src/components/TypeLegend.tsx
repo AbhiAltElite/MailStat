@@ -1,6 +1,6 @@
 import type { TypeStat } from "../lib/api";
 import { CATEGORY_LABELS, colorFor } from "../lib/colors";
-import { formatBytes, formatCount } from "../lib/format";
+import { formatBytes } from "../lib/format";
 
 interface Props {
   stats: TypeStat[];
@@ -8,7 +8,7 @@ interface Props {
   onHighlight: (cat: string | null) => void;
 }
 
-/** The WinDirStat "extension list": what kinds of content weigh the most. */
+/** Content types by weight, the email analogue of a file extension list. */
 export default function TypeLegend({ stats, highlight, onHighlight }: Props) {
   const total = Math.max(
     stats.reduce((a, s) => a + s.size, 0),
@@ -22,25 +22,21 @@ export default function TypeLegend({ stats, highlight, onHighlight }: Props) {
           <button
             key={s.cat}
             onClick={() => onHighlight(active ? null : s.cat)}
-            className={`flex items-center gap-2 rounded px-2 py-1 text-left ${
-              active ? "bg-slate-700/70" : "hover:bg-slate-800/70"
+            className={`flex items-center gap-2 rounded-md px-2 py-1 text-left ${
+              active ? "bg-raised" : "hover:bg-raised"
             }`}
+            title="Highlight in treemap"
           >
             <span
-              className="h-3 w-3 shrink-0 rounded-sm"
+              className="h-2.5 w-2.5 shrink-0 rounded-sm"
               style={{ background: colorFor(s.cat) }}
             />
-            <span className="flex-1 truncate text-[12px] text-slate-200">
+            <span className="flex-1 truncate text-xs text-ink">
               {CATEGORY_LABELS[s.cat] ?? s.cat}
             </span>
-            <span className="text-[11px] tabular-nums text-slate-400">
-              {formatBytes(s.size)}
-            </span>
-            <span className="w-12 shrink-0 text-right text-[10px] tabular-nums text-slate-500">
+            <span className="text-[11px] tabular-nums text-muted">{formatBytes(s.size)}</span>
+            <span className="w-11 shrink-0 text-right text-[10px] tabular-nums text-faint">
               {((s.size / total) * 100).toFixed(1)}%
-            </span>
-            <span className="w-14 shrink-0 text-right text-[10px] tabular-nums text-slate-600">
-              {formatCount(s.count)}
             </span>
           </button>
         );
