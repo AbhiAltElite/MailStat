@@ -498,6 +498,11 @@ export default function App() {
           <p className="px-2 pt-4 pb-1 text-[11px] font-semibold tracking-wider text-faint uppercase">
             Content types
           </p>
+          <p className="px-2 pb-2 text-[11px] leading-snug text-faint">
+            Individual message tiles are colored by content type, matching this legend. Sender
+            tiles get a distinct color per sender instead, just so neighboring senders are easy
+            to tell apart; that color is not a content-type signal.
+          </p>
           <TypeLegend stats={typeStats} highlight={highlightCat} onHighlight={setHighlightCat} />
         </aside>
         <ResizeHandle
