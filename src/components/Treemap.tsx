@@ -222,7 +222,11 @@ export default function Treemap({
       if (leaf.depth === 0) continue;
       const w = leaf.x1 - leaf.x0;
       const h = leaf.y1 - leaf.y0;
-      if (w < 0.5 || h < 0.5) continue;
+      // Screen-space, like every other size check below: a tile that's
+      // sub-pixel at 100% but has real (nonzero) world-space area should
+      // still appear once zoomed in enough to see it, not stay permanently
+      // blank because it once measured under a fixed world-space threshold.
+      if (w * s < 0.75 || h * s < 0.75) continue;
       const d = leaf.data;
       const base =
         d.cat === "mixed" ? hashColor(d.key + d.label) : colorFor(d.cat);
