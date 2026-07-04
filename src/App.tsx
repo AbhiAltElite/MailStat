@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
@@ -85,23 +85,26 @@ export default function App() {
   const refreshData = useCallback(async () => {
     if (accountId == null) return;
     setDataLoading(true);
-    try {
-      const [f, t, s, l, u] = await Promise.all([
-        api.getFolders(accountId),
-        api.typeStats(accountId),
-        api.topSenders(accountId, 200),
-        api.largestMessages(accountId, 200),
-        api.unsubscribeCandidates(accountId, 200),
-      ]);
-      setFolders(f);
-      setTypeStats(t);
-      setSenders(s);
-      setLargest(l);
-      setUnsub(u);
-    } finally {
-      setDataLoading(false);
+    // allSettled so one failing query (for example an unusual header on a
+    // single real-world message) can't blank out every other panel.
+    const [f, t, s, l, u] = await Promise.allSettled([
+      api.getFolders(accountId),
+      api.typeStats(accountId),
+      api.topSenders(accountId, 200),
+      api.largestMessages(accountId, 200),
+      api.unsubscribeCandidates(accountId, 200),
+    ]);
+    if (f.status === "fulfilled") setFolders(f.value);
+    if (t.status === "fulfilled") setTypeStats(t.value);
+    if (s.status === "fulfilled") setSenders(s.value);
+    if (l.status === "fulfilled") setLargest(l.value);
+    if (u.status === "fulfilled") setUnsub(u.value);
+    const failed = [f, t, s, l, u].filter((r) => r.status === "rejected");
+    if (failed.length) {
+      notify(`Some panels failed to load: ${failed.map((r) => r.reason).join(", ")}`);
     }
-  }, [accountId]);
+    setDataLoading(false);
+  }, [accountId, notify]);
 
   const refreshTreemap = useCallback(async () => {
     if (accountId == null) return;
@@ -125,31 +128,38 @@ export default function App() {
     refreshTreemap();
   }, [refreshTreemap]);
 
-  // Scan lifecycle events from the Rust side.
+  // Scan lifecycle events from the Rust side. Registered once: routing
+  // through refs (rather than depending on refreshData/refreshTreemap
+  // directly) keeps this subscription alive across drill-downs and grouping
+  // changes, which would otherwise tear it down and briefly leave no
+  // listener attached, dropping a scan-done event that lands in that gap.
+  const liveRefs = useRef({ notify, refreshAccounts, refreshData, refreshTreemap });
+  liveRefs.current = { notify, refreshAccounts, refreshData, refreshTreemap };
+
   useEffect(() => {
     if (!isTauri) return;
     const unlisteners: Promise<() => void>[] = [
       listen<ScanProgress>("scan-progress", (e) => setScan(e.payload)),
       listen<number>("scan-done", async () => {
         setScan(null);
-        notify("Scan complete");
-        await refreshAccounts();
-        await refreshData();
-        await refreshTreemap();
+        liveRefs.current.notify("Scan complete");
+        await liveRefs.current.refreshAccounts();
+        await liveRefs.current.refreshData();
+        await liveRefs.current.refreshTreemap();
       }),
       listen<number>("scan-cancelled", () => {
         setScan(null);
-        notify("Scan cancelled");
+        liveRefs.current.notify("Scan cancelled");
       }),
       listen<[number, string]>("scan-error", (e) => {
         setScan(null);
-        notify(`Scan failed: ${e.payload[1]}`);
+        liveRefs.current.notify(`Scan failed: ${e.payload[1]}`);
       }),
     ];
     return () => {
       unlisteners.forEach((u) => u.then((f) => f()));
     };
-  }, [notify, refreshAccounts, refreshData, refreshTreemap]);
+  }, []);
 
   const startDemo = async () => {
     await api.seedDemo();
