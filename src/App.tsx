@@ -1,0 +1,504 @@
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import {
+  api,
+  isTauri,
+  type Account,
+  type FolderInfo,
+  type MessageRow,
+  type NewAccount,
+  type PathSeg,
+  type ScanProgress,
+  type SenderStat,
+  type TreeNode,
+  type TypeStat,
+} from "./lib/api";
+import { formatBytes, formatCount } from "./lib/format";
+import Treemap from "./components/Treemap";
+import FolderTree from "./components/FolderTree";
+import TypeLegend from "./components/TypeLegend";
+import TopPanel, { type TopTab } from "./components/TopPanel";
+import AddAccountModal from "./components/AddAccountModal";
+import ConfirmDialog, { type PendingAction } from "./components/ConfirmDialog";
+
+const GROUPINGS: { id: string; label: string; dims: string[] }[] = [
+  { id: "folder-sender", label: "Folder → Sender", dims: ["folder", "sender"] },
+  { id: "sender", label: "Sender", dims: ["sender"] },
+  { id: "year-sender", label: "Year → Sender", dims: ["year", "sender"] },
+  { id: "type-sender", label: "Type → Sender", dims: ["type", "sender"] },
+];
+
+export default function App() {
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [accountId, setAccountId] = useState<number | null>(null);
+  const [folders, setFolders] = useState<FolderInfo[]>([]);
+  const [grouping, setGrouping] = useState(GROUPINGS[0]);
+  const [drillPath, setDrillPath] = useState<PathSeg[]>([]);
+  const [nodes, setNodes] = useState<TreeNode[]>([]);
+  const [typeStats, setTypeStats] = useState<TypeStat[]>([]);
+  const [senders, setSenders] = useState<SenderStat[]>([]);
+  const [largest, setLargest] = useState<MessageRow[]>([]);
+  const [unsub, setUnsub] = useState<SenderStat[]>([]);
+  const [tab, setTab] = useState<TopTab>("senders");
+  const [highlightCat, setHighlightCat] = useState<string | null>(null);
+  const [selected, setSelected] = useState<TreeNode | null>(null);
+  const [checkedSenders, setCheckedSenders] = useState<Set<string>>(new Set());
+  const [checkedMessages, setCheckedMessages] = useState<Set<number>>(new Set());
+  const [scan, setScan] = useState<ScanProgress | null>(null);
+  const [showAdd, setShowAdd] = useState(false);
+  const [pending, setPending] = useState<PendingAction | null>(null);
+  const [actionBusy, setActionBusy] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+
+  const account = accounts.find((a) => a.id === accountId) ?? null;
+
+  const notify = useCallback((msg: string) => {
+    setToast(msg);
+    window.setTimeout(() => setToast(null), 5000);
+  }, []);
+
+  const refreshAccounts = useCallback(async () => {
+    const list = await api.listAccounts();
+    setAccounts(list);
+    setAccountId((cur) => (cur && list.some((a) => a.id === cur) ? cur : (list[0]?.id ?? null)));
+  }, []);
+
+  const refreshData = useCallback(async () => {
+    if (accountId == null) return;
+    const [f, t, s, l, u] = await Promise.all([
+      api.getFolders(accountId),
+      api.typeStats(accountId),
+      api.topSenders(accountId, 200),
+      api.largestMessages(accountId, 200),
+      api.unsubscribeCandidates(accountId, 200),
+    ]);
+    setFolders(f);
+    setTypeStats(t);
+    setSenders(s);
+    setLargest(l);
+    setUnsub(u);
+  }, [accountId]);
+
+  const refreshTreemap = useCallback(async () => {
+    if (accountId == null) return;
+    setNodes(await api.getTreemap(accountId, grouping.dims, drillPath));
+  }, [accountId, grouping, drillPath]);
+
+  useEffect(() => {
+    refreshAccounts();
+  }, [refreshAccounts]);
+  useEffect(() => {
+    setDrillPath([]);
+    setSelected(null);
+    setCheckedSenders(new Set());
+    setCheckedMessages(new Set());
+  }, [accountId, grouping.id]);
+  useEffect(() => {
+    refreshData();
+  }, [refreshData]);
+  useEffect(() => {
+    refreshTreemap();
+  }, [refreshTreemap]);
+
+  // Scan lifecycle events from the Rust side.
+  useEffect(() => {
+    if (!isTauri) return;
+    const unlisteners: Promise<() => void>[] = [
+      listen<ScanProgress>("scan-progress", (e) => setScan(e.payload)),
+      listen<number>("scan-done", async () => {
+        setScan(null);
+        notify("Scan complete");
+        await refreshAccounts();
+        await refreshData();
+        await refreshTreemap();
+      }),
+      listen<number>("scan-cancelled", () => {
+        setScan(null);
+        notify("Scan cancelled");
+      }),
+      listen<[number, string]>("scan-error", (e) => {
+        setScan(null);
+        notify(`Scan failed: ${e.payload[1]}`);
+      }),
+    ];
+    return () => {
+      unlisteners.forEach((u) => u.then((f) => f()));
+    };
+  }, [notify, refreshAccounts, refreshData, refreshTreemap]);
+
+  const startDemo = async () => {
+    await api.seedDemo();
+    await refreshAccounts();
+  };
+
+  const addAccount = async (cfg: NewAccount) => {
+    const id = await api.addAccount(cfg);
+    await refreshAccounts();
+    setAccountId(id);
+    await api.startScan(id);
+  };
+
+  const drillTo = (node: TreeNode) => {
+    const dim = grouping.dims[drillPath.length];
+    if (!dim) return;
+    setSelected(null);
+    setDrillPath([...drillPath, { dim, key: node.key, label: node.label }]);
+  };
+
+  const folderSelect = (f: FolderInfo | null) => {
+    setSelected(null);
+    if (!f) {
+      setDrillPath([]);
+      return;
+    }
+    if (grouping.dims[0] === "folder") {
+      setDrillPath([{ dim: "folder", key: String(f.id), label: f.name }]);
+    } else {
+      setGrouping(GROUPINGS[0]);
+      // grouping change resets path; set it on next tick semantics via state below
+      setTimeout(() => setDrillPath([{ dim: "folder", key: String(f.id), label: f.name }]), 0);
+    }
+  };
+
+  // ---- cleanup actions ----------------------------------------------------
+
+  const requestNodeAction = async (action: PendingAction["action"]) => {
+    if (accountId == null || !selected || selected.key === "__other__") return;
+    const dim = selected.key.startsWith("m:") ? "msg" : grouping.dims[drillPath.length];
+    const path = [...drillPath, { dim, key: selected.key }];
+    const ids = await api.idsForPath(accountId, path);
+    setPending({ action, ids, bytes: selected.size, what: selected.label });
+  };
+
+  const requestCheckedAction = async (action: PendingAction["action"]) => {
+    if (accountId == null) return;
+    let ids: number[] = [];
+    let what = "";
+    if (checkedSenders.size) {
+      ids = await api.idsForSenders(accountId, [...checkedSenders]);
+      what = `${checkedSenders.size} sender${checkedSenders.size > 1 ? "s" : ""}`;
+    }
+    if (checkedMessages.size) {
+      ids = [...new Set([...ids, ...checkedMessages])];
+      what = what ? `${what} + ${checkedMessages.size} messages` : `${checkedMessages.size} messages`;
+    }
+    if (!ids.length) return;
+    const bytes = largest.filter((m) => checkedMessages.has(m.id)).reduce((a, m) => a + m.size, 0);
+    setPending({ action, ids, bytes: bytes || senderBytes(), what });
+  };
+
+  const senderBytes = () =>
+    senders.filter((s) => checkedSenders.has(s.email)).reduce((a, s) => a + s.size, 0);
+
+  const confirmAction = async () => {
+    if (!pending || accountId == null) return;
+    setActionBusy(true);
+    try {
+      const res = await api.performAction(accountId, pending.ids, pending.action);
+      notify(
+        `${pending.action === "archive" ? "Archived" : pending.action === "trash" ? "Moved to Trash" : "Deleted"} ${formatCount(res.affected)} messages · ${formatBytes(res.bytes)}`,
+      );
+      setPending(null);
+      setSelected(null);
+      setCheckedSenders(new Set());
+      setCheckedMessages(new Set());
+      await refreshAccounts();
+      await refreshData();
+      await refreshTreemap();
+    } catch (e) {
+      notify(`Action failed: ${e}`);
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const openUnsubscribe = async (raw: string) => {
+    // List-Unsubscribe: <https://...>, <mailto:...> — prefer the https target.
+    const targets = [...raw.matchAll(/<([^>]+)>/g)].map((m) => m[1]);
+    const url = targets.find((t) => t.startsWith("http")) ?? targets[0];
+    if (!url) return notify("No unsubscribe link in header");
+    if (isTauri) await openUrl(url);
+    else window.open(url, "_blank");
+  };
+
+  const anyChecked = checkedSenders.size > 0 || checkedMessages.size > 0;
+  const hasArchive = folders.some((f) => f.special === "archive");
+  const selectionActive = (selected && selected.key !== "__other__") || anyChecked;
+
+  const breadcrumb = useMemo(
+    () => [{ label: account?.label ?? "", path: [] as PathSeg[] }].concat(
+      drillPath.map((seg, i) => ({
+        label: seg.label ?? seg.key,
+        path: drillPath.slice(0, i + 1),
+      })),
+    ),
+    [drillPath, account],
+  );
+
+  // ---- empty states -------------------------------------------------------
+
+  if (!accounts.length) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-4">
+        <h1 className="text-2xl font-semibold text-slate-100">Mailstat</h1>
+        <p className="max-w-md text-center text-[14px] leading-relaxed text-slate-400">
+          WinDirStat for your email. Connect a mailbox over IMAP and see where the
+          gigabytes live — then clean them up. Only sizes and headers are read; your
+          messages never leave this machine.
+        </p>
+        <div className="flex gap-3">
+          <button
+            onClick={() => setShowAdd(true)}
+            className="rounded bg-sky-700 px-5 py-2 text-[14px] font-medium text-white hover:bg-sky-600"
+          >
+            Connect account
+          </button>
+          <button
+            onClick={startDemo}
+            className="rounded bg-slate-800 px-5 py-2 text-[14px] text-slate-200 hover:bg-slate-700"
+          >
+            Try with demo data
+          </button>
+        </div>
+        {showAdd && <AddAccountModal onClose={() => setShowAdd(false)} onAdd={addAccount} />}
+        {toast && <Toast msg={toast} />}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex h-full flex-col">
+      {/* Header */}
+      <header className="flex items-center gap-3 border-b border-slate-800 px-3 py-2">
+        <span className="text-[14px] font-semibold tracking-tight text-slate-100">Mailstat</span>
+        <select
+          value={accountId ?? undefined}
+          onChange={(e) => setAccountId(Number(e.target.value))}
+          className="rounded border border-slate-700 bg-slate-800 px-2 py-1 text-[12px] text-slate-200"
+        >
+          {accounts.map((a) => (
+            <option key={a.id} value={a.id}>
+              {a.label} · {formatBytes(a.total_size)}
+            </option>
+          ))}
+        </select>
+        <select
+          value={grouping.id}
+          onChange={(e) => setGrouping(GROUPINGS.find((g) => g.id === e.target.value)!)}
+          className="rounded border border-slate-700 bg-slate-800 px-2 py-1 text-[12px] text-slate-200"
+        >
+          {GROUPINGS.map((g) => (
+            <option key={g.id} value={g.id}>
+              {g.label}
+            </option>
+          ))}
+        </select>
+
+        {account?.kind === "imap" &&
+          (scan ? (
+            <button
+              onClick={() => accountId != null && api.cancelScan(accountId)}
+              className="rounded bg-amber-800 px-3 py-1 text-[12px] text-amber-100 hover:bg-amber-700"
+            >
+              Cancel scan
+            </button>
+          ) : (
+            <button
+              onClick={() => accountId != null && api.startScan(accountId).catch((e) => notify(String(e)))}
+              className="rounded bg-slate-800 px-3 py-1 text-[12px] text-slate-200 hover:bg-slate-700"
+            >
+              Rescan
+            </button>
+          ))}
+        <button
+          onClick={() => setShowAdd(true)}
+          className="rounded bg-slate-800 px-3 py-1 text-[12px] text-slate-200 hover:bg-slate-700"
+        >
+          + Account
+        </button>
+
+        <div className="flex-1" />
+        {account && (
+          <span className="text-[12px] tabular-nums text-slate-400">
+            {formatCount(account.msg_count)} messages · {formatBytes(account.total_size)}
+          </span>
+        )}
+      </header>
+
+      {/* Scan progress */}
+      {scan && (
+        <div className="border-b border-slate-800 bg-slate-900/70 px-3 py-1.5">
+          <div className="flex items-center justify-between text-[11px] text-slate-400">
+            <span>
+              Scanning {scan.folder} ({scan.folder_index + 1}/{scan.folder_count}) ·{" "}
+              {formatCount(Number(scan.messages_total))} messages · {formatBytes(Number(scan.bytes_total))}
+            </span>
+            <span>
+              {scan.total_in_folder
+                ? `${Math.round((scan.done_in_folder / scan.total_in_folder) * 100)}%`
+                : ""}
+            </span>
+          </div>
+          <div className="mt-1 h-1 rounded bg-slate-800">
+            <div
+              className="h-1 rounded bg-sky-500 transition-all"
+              style={{
+                width: `${scan.total_in_folder ? (scan.done_in_folder / scan.total_in_folder) * 100 : 0}%`,
+              }}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Body */}
+      <div className="flex min-h-0 flex-1">
+        {/* Left: folders */}
+        <aside className="w-60 shrink-0 overflow-y-auto border-r border-slate-800 p-2">
+          <p className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+            Folders
+          </p>
+          <FolderTree
+            folders={folders}
+            selectedId={drillPath[0]?.dim === "folder" ? Number(drillPath[0].key) : null}
+            onSelect={folderSelect}
+          />
+          <p className="px-2 pb-1 pt-4 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+            Content types
+          </p>
+          <TypeLegend stats={typeStats} highlight={highlightCat} onHighlight={setHighlightCat} />
+        </aside>
+
+        {/* Center: treemap */}
+        <main className="flex min-w-0 flex-1 flex-col">
+          <div className="flex items-center gap-1 border-b border-slate-800 px-2 py-1 text-[12px]">
+            {breadcrumb.map((b, i) => (
+              <span key={i} className="flex items-center gap-1">
+                {i > 0 && <span className="text-slate-600">/</span>}
+                <button
+                  onClick={() => {
+                    setSelected(null);
+                    setDrillPath(b.path);
+                  }}
+                  className={`rounded px-1.5 py-0.5 ${
+                    i === breadcrumb.length - 1
+                      ? "text-slate-100"
+                      : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"
+                  }`}
+                >
+                  {b.label}
+                </button>
+              </span>
+            ))}
+            <span className="ml-2 text-[11px] text-slate-600">
+              double-click to drill in · click to select
+            </span>
+          </div>
+          <div className="min-h-0 flex-1">
+            <Treemap
+              nodes={nodes}
+              selectedKey={selected?.key ?? null}
+              onSelect={setSelected}
+              onDrill={drillTo}
+              highlightCat={highlightCat}
+            />
+          </div>
+        </main>
+
+        {/* Right: top lists */}
+        <aside className="w-80 shrink-0 border-l border-slate-800">
+          <TopPanel
+            tab={tab}
+            onTab={setTab}
+            senders={senders}
+            largest={largest}
+            unsubscribe={unsub}
+            checkedSenders={checkedSenders}
+            onToggleSender={(email) =>
+              setCheckedSenders((prev) => {
+                const next = new Set(prev);
+                if (next.has(email)) next.delete(email);
+                else next.add(email);
+                return next;
+              })
+            }
+            checkedMessages={checkedMessages}
+            onToggleMessage={(id) =>
+              setCheckedMessages((prev) => {
+                const next = new Set(prev);
+                if (next.has(id)) next.delete(id);
+                else next.add(id);
+                return next;
+              })
+            }
+            onOpenUnsubscribe={openUnsubscribe}
+            onFocusSender={(email, name) => {
+              setGrouping(GROUPINGS[1]);
+              setTimeout(() => setDrillPath([{ dim: "sender", key: email, label: name }]), 0);
+            }}
+          />
+        </aside>
+      </div>
+
+      {/* Selection / action bar */}
+      {selectionActive && (
+        <footer className="flex items-center gap-3 border-t border-slate-800 bg-slate-900 px-3 py-2">
+          <span className="min-w-0 flex-1 truncate text-[12px] text-slate-300">
+            {selected && selected.key !== "__other__"
+              ? `Selected: ${selected.label} — ${formatCount(selected.count)} messages · ${formatBytes(selected.size)}`
+              : `Checked: ${checkedSenders.size} senders, ${checkedMessages.size} messages`}
+          </span>
+          {(["archive", "trash", "delete"] as const).map((action) => {
+            if (action === "archive" && account?.kind === "imap" && !hasArchive) return null;
+            const run = () =>
+              selected && selected.key !== "__other__"
+                ? requestNodeAction(action)
+                : requestCheckedAction(action);
+            const styles =
+              action === "delete"
+                ? "bg-red-900/70 text-red-200 hover:bg-red-800"
+                : "bg-slate-800 text-slate-200 hover:bg-slate-700";
+            return (
+              <button
+                key={action}
+                onClick={run}
+                className={`rounded px-3 py-1.5 text-[12px] font-medium capitalize ${styles}`}
+              >
+                {action === "trash" ? "Move to Trash" : action}
+              </button>
+            );
+          })}
+          <button
+            onClick={() => {
+              setSelected(null);
+              setCheckedSenders(new Set());
+              setCheckedMessages(new Set());
+            }}
+            className="rounded px-2 py-1.5 text-[12px] text-slate-400 hover:bg-slate-800"
+          >
+            Clear
+          </button>
+        </footer>
+      )}
+
+      {showAdd && <AddAccountModal onClose={() => setShowAdd(false)} onAdd={addAccount} />}
+      {pending && (
+        <ConfirmDialog
+          pending={pending}
+          busy={actionBusy}
+          onConfirm={confirmAction}
+          onCancel={() => setPending(null)}
+        />
+      )}
+      {toast && <Toast msg={toast} />}
+    </div>
+  );
+}
+
+function Toast({ msg }: { msg: string }) {
+  return (
+    <div className="fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-lg border border-slate-700 bg-slate-800 px-4 py-2 text-[13px] text-slate-100 shadow-xl">
+      {msg}
+    </div>
+  );
+}
