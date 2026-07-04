@@ -51,6 +51,16 @@ const ATTACH_KINDS: &[(&str, &str, f64)] = &[
 ];
 
 pub fn seed(conn: &mut Connection) -> Result<i64, String> {
+    // Idempotent: reuse the existing demo mailbox rather than piling up a new
+    // one every time "Try with demo data" is clicked.
+    if let Ok(existing) = conn.query_row(
+        "SELECT id FROM accounts WHERE kind = 'demo' LIMIT 1",
+        [],
+        |r| r.get::<_, i64>(0),
+    ) {
+        return Ok(existing);
+    }
+
     let mut rng = StdRng::seed_from_u64(42);
     let now: i64 = 1_751_600_000; // fixed "now" so the demo is deterministic
     let four_years: i64 = 4 * 365 * 24 * 3600;

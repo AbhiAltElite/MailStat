@@ -63,6 +63,8 @@ export default function App() {
   const [toast, setToast] = useState<string | null>(null);
   const [detailId, setDetailId] = useState<number | null>(null);
   const [dataLoading, setDataLoading] = useState(false);
+  const [removeConfirm, setRemoveConfirm] = useState<Account | null>(null);
+  const [removeBusy, setRemoveBusy] = useState(false);
 
   const account = accounts.find((a) => a.id === accountId) ?? null;
 
@@ -79,7 +81,14 @@ export default function App() {
   const refreshAccounts = useCallback(async () => {
     const list = await api.listAccounts();
     setAccounts(list);
-    setAccountId((cur) => (cur && list.some((a) => a.id === cur) ? cur : (list[0]?.id ?? null)));
+    setAccountId((cur) => {
+      if (cur && list.some((a) => a.id === cur)) return cur;
+      // Prefer a real account over the demo mailbox when nothing is
+      // selected yet, so a leftover demo account never eclipses real mail
+      // after a restart.
+      const preferred = list.find((a) => a.kind !== "demo") ?? list[0];
+      return preferred?.id ?? null;
+    });
   }, []);
 
   const refreshData = useCallback(async () => {
@@ -270,6 +279,21 @@ export default function App() {
     }
   };
 
+  const confirmRemoveAccount = async () => {
+    if (!removeConfirm) return;
+    setRemoveBusy(true);
+    try {
+      await api.removeAccount(removeConfirm.id);
+      setRemoveConfirm(null);
+      setAccountId(null);
+      await refreshAccounts();
+    } catch (e) {
+      notify(`Could not remove account: ${e}`);
+    } finally {
+      setRemoveBusy(false);
+    }
+  };
+
   const openUnsubscribe = async (raw: string) => {
     const targets = [...raw.matchAll(/<([^>]+)>/g)].map((m) => m[1]);
     const url = targets.find((t) => t.startsWith("http")) ?? targets[0];
@@ -390,6 +414,14 @@ export default function App() {
         >
           Add account
         </button>
+        {account && (
+          <button
+            onClick={() => setRemoveConfirm(account)}
+            className="rounded-md border border-line px-3 py-1 text-xs text-muted hover:bg-raised hover:text-ink"
+          >
+            Remove account
+          </button>
+        )}
 
         <div className="flex-1" />
         {account && (
@@ -571,6 +603,40 @@ export default function App() {
       )}
 
       {showAdd && <AddAccountModal onClose={() => setShowAdd(false)} onAdd={addAccount} />}
+      {removeConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div
+            role="alertdialog"
+            aria-label="Remove account"
+            className="w-95 rounded-lg border border-line bg-surface p-5 shadow-2xl"
+          >
+            <h2 className="text-[15px] font-semibold text-ink">Remove account</h2>
+            <p className="mt-2 text-[13px] leading-relaxed text-ink">
+              Remove {removeConfirm.label} from Mailstat?
+            </p>
+            <p className="mt-1 text-xs text-muted">
+              This deletes the local scan cache and, for IMAP accounts, the saved app password.
+              Nothing is changed on the mail server itself.
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                onClick={() => setRemoveConfirm(null)}
+                disabled={removeBusy}
+                className="rounded-md px-3 py-1.5 text-[13px] text-muted hover:bg-raised hover:text-ink"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmRemoveAccount}
+                disabled={removeBusy}
+                className="rounded-md bg-danger px-4 py-1.5 text-[13px] font-medium text-white hover:opacity-90 disabled:opacity-60"
+              >
+                {removeBusy ? "Removing" : "Remove account"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {pending && (
         <ConfirmDialog
           pending={pending}
