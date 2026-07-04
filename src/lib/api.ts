@@ -90,6 +90,12 @@ export interface MessageDetail {
   from_sender: MessageRow[];
 }
 
+export interface MessageBody {
+  content_type: "text" | "html" | "none";
+  content: string;
+  truncated: boolean;
+}
+
 export interface TypeStat {
   cat: string;
   count: number;
@@ -141,6 +147,7 @@ const tauriApi = {
   typeStats: (accountId: number) => invoke<TypeStat[]>("get_type_stats", { accountId }),
   accountStats: (accountId: number) => invoke<AccountStats>("get_account_stats", { accountId }),
   messageDetail: (messageId: number) => invoke<MessageDetail>("get_message_detail", { messageId }),
+  messageBody: (messageId: number) => invoke<MessageBody>("get_message_body", { messageId }),
   idsForPath: (accountId: number, path: PathSeg[]) =>
     invoke<number[]>("ids_for_path", { accountId, path: strip(path) }),
   idsForSenders: (accountId: number, senders: string[]) =>

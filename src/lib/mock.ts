@@ -6,6 +6,7 @@ import type {
   AccountStats,
   ActionResult,
   FolderInfo,
+  MessageBody,
   MessageDetail,
   MessageRow,
   NewAccount,
@@ -389,6 +390,18 @@ export const mockApi = {
       attachments,
       thread,
       from_sender: fromSender,
+    };
+  },
+  async messageBody(messageId: number): Promise<MessageBody> {
+    const m = messages.find((x) => x.id === messageId);
+    if (!m) throw "message not found";
+    return {
+      content_type: "text",
+      content:
+        `This is the built-in demo mailbox, which is not backed by a real mail server, ` +
+        `so there is no message content to fetch. In a connected IMAP account, this would ` +
+        `show the full text of "${m.subject || "(no subject)"}" from ${m.fromName || m.fromEmail}.`,
+      truncated: false,
     };
   },
   async seedDemo(): Promise<number> {

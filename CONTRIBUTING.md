@@ -22,7 +22,12 @@ Thanks for considering a contribution.
 
 ## Scope notes
 
-- The scanner must stay metadata only. Do not fetch message bodies.
+- The bulk scanner must stay metadata only. Do not fetch message content during
+  a scan. Content may only be fetched for one message at a time, on explicit
+  user action, and must never be written to the local cache.
+- Any HTML rendered from message content must go through the sanitizer
+  (`src-tauri/src/content.rs`) and render in a sandboxed frame with no
+  scripting and no remote images.
 - Credentials belong in the OS keychain, never in SQLite or config files.
 - New providers should implement scanning and actions behind the same command
   surface used by the IMAP connector.

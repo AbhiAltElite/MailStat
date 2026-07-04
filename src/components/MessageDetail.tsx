@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, type MessageDetail as Detail, type MessageRow } from "../lib/api";
+import { api, type MessageBody, type MessageDetail as Detail, type MessageRow } from "../lib/api";
 import { CATEGORY_LABELS, colorFor } from "../lib/colors";
 import { formatBytes, formatDate } from "../lib/format";
 
@@ -22,11 +22,17 @@ export default function MessageDetail({
 }: Props) {
   const [detail, setDetail] = useState<Detail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [body, setBody] = useState<MessageBody | null>(null);
+  const [bodyLoading, setBodyLoading] = useState(false);
+  const [bodyError, setBodyError] = useState<string | null>(null);
 
   useEffect(() => {
     let live = true;
     setDetail(null);
     setError(null);
+    setBody(null);
+    setBodyLoading(false);
+    setBodyError(null);
     api
       .messageDetail(messageId)
       .then((d) => live && setDetail(d))
@@ -35,6 +41,16 @@ export default function MessageDetail({
       live = false;
     };
   }, [messageId]);
+
+  const loadBody = () => {
+    setBodyLoading(true);
+    setBodyError(null);
+    api
+      .messageBody(messageId)
+      .then(setBody)
+      .catch((e) => setBodyError(String(e)))
+      .finally(() => setBodyLoading(false));
+  };
 
   return (
     <div className="fixed inset-0 z-40 flex justify-end bg-black/40" onClick={onClose}>
@@ -123,6 +139,64 @@ export default function MessageDetail({
                 </button>
               )}
             </div>
+
+            <Section title="Content">
+              {!body && !bodyLoading && (
+                <div className="px-4 py-2">
+                  <button
+                    onClick={loadBody}
+                    className="rounded-md border border-line bg-surface px-3 py-1.5 text-xs font-medium text-ink hover:bg-raised"
+                  >
+                    Load message content
+                  </button>
+                  <p className="mt-1.5 text-[11px] text-faint">
+                    Fetched live from the server for this message only. Not cached, and remote
+                    images are blocked.
+                  </p>
+                  {bodyError && <p className="mt-1.5 text-xs text-danger">{bodyError}</p>}
+                </div>
+              )}
+              {bodyLoading && (
+                <div className="flex flex-col gap-2 px-4 py-2" aria-busy="true">
+                  {[...Array(4)].map((_, i) => (
+                    <div key={i} className="h-3 animate-pulse rounded-md bg-raised" />
+                  ))}
+                </div>
+              )}
+              {body && (
+                <div className="px-4 py-2">
+                  {body.truncated && (
+                    <p className="mb-1.5 text-[11px] text-faint">
+                      This message was long, so the content shown below is truncated.
+                    </p>
+                  )}
+                  {body.content_type === "none" && (
+                    <p className="text-xs text-faint">
+                      No readable content was found for this message.
+                    </p>
+                  )}
+                  {body.content_type === "text" && (
+                    <pre className="max-h-90 overflow-y-auto rounded-md border border-line bg-canvas p-3 text-xs whitespace-pre-wrap text-ink">
+                      {body.content}
+                    </pre>
+                  )}
+                  {body.content_type === "html" && (
+                    <iframe
+                      title="Message content"
+                      sandbox=""
+                      srcDoc={body.content}
+                      className="h-90 w-full rounded-md border border-line bg-white"
+                    />
+                  )}
+                  <button
+                    onClick={loadBody}
+                    className="mt-2 text-[11px] text-muted hover:text-ink hover:underline"
+                  >
+                    Reload content
+                  </button>
+                </div>
+              )}
+            </Section>
 
             {detail.attachments.length > 0 && (
               <Section title={`Attachments (${detail.attachments.length})`}>

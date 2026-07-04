@@ -102,3 +102,30 @@ fn cleanup_action_on_demo_account() {
     assert_eq!(after.msg_count, before.msg_count - top.count);
     assert_eq!(after.total_size, before.total_size - top.size);
 }
+
+#[test]
+fn duplicate_imap_account_detection_is_case_and_whitespace_insensitive() {
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    db::init(&conn).unwrap();
+    conn.execute(
+        "INSERT INTO accounts (kind, email, label, host, port, username, created_at) \
+         VALUES ('imap', 'Someone@Example.com', 'label', 'imap.example.com', 993, 'u', 0)",
+        [],
+    )
+    .unwrap();
+
+    assert!(db::imap_account_exists(&conn, "someone@example.com").unwrap());
+    assert!(db::imap_account_exists(&conn, "  Someone@EXAMPLE.com  ").unwrap());
+    assert!(!db::imap_account_exists(&conn, "other@example.com").unwrap());
+
+    // A demo account with the same address never blocks a real one.
+    conn.execute(
+        "INSERT INTO accounts (kind, email, label, created_at) \
+         VALUES ('demo', 'someone@example.com', 'demo', 0)",
+        [],
+    )
+    .unwrap();
+    assert!(db::imap_account_exists(&conn, "someone@example.com").unwrap());
+    conn.execute("DELETE FROM accounts WHERE kind='imap'", []).unwrap();
+    assert!(!db::imap_account_exists(&conn, "someone@example.com").unwrap());
+}

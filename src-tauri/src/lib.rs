@@ -1,4 +1,5 @@
 pub mod actions;
+pub mod content;
 pub mod db;
 pub mod demo;
 pub mod mailmeta;
@@ -70,6 +71,16 @@ fn list_accounts(state: State<AppState>) -> Result<Vec<Account>, String> {
 
 #[tauri::command]
 async fn add_account(state: State<'_, AppState>, cfg: NewAccount) -> Result<i64, String> {
+    if cfg.email.trim().is_empty() {
+        return Err("Enter an email address".into());
+    }
+    {
+        let conn = open_db(&state)?;
+        if db::imap_account_exists(&conn, &cfg.email).map_err(|e| e.to_string())? {
+            return Err(format!("{} is already added", cfg.email.trim()));
+        }
+    }
+
     // Verify credentials before persisting anything.
     let creds = ImapCreds {
         host: cfg.host.clone(),
@@ -214,6 +225,46 @@ fn get_account_stats(state: State<AppState>, account_id: i64) -> Result<AccountS
     queries::account_stats(&conn, account_id).map_err(|e| e.to_string())
 }
 
+/// Fetch the full content of exactly one message, live, on demand. Never
+/// runs during a scan and the result is never written to the local cache.
+#[tauri::command]
+async fn get_message_body(state: State<'_, AppState>, message_id: i64) -> Result<MessageBody, String> {
+    let db_path = state.db_path.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = db::open(&db_path).map_err(|e| e.to_string())?;
+        let (account_id, folder_path, uid, kind): (i64, String, i64, String) = conn
+            .query_row(
+                "SELECT m.account_id, f.path, m.uid, a.kind FROM messages m \
+                 JOIN folders f ON f.id = m.folder_id \
+                 JOIN accounts a ON a.id = m.account_id \
+                 WHERE m.id = ?1",
+                params![message_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .map_err(|e| e.to_string())?;
+
+        if kind == "demo" {
+            return Ok(content::demo_body());
+        }
+
+        let creds = creds_for(&conn, account_id)?;
+        let mut session = scan::connect(&creds)?;
+        session.select(&folder_path).map_err(|e| e.to_string())?;
+        let fetches = session
+            .uid_fetch(uid.to_string(), "BODY.PEEK[]")
+            .map_err(|e| e.to_string())?;
+        let raw = fetches
+            .iter()
+            .find_map(|f| f.body())
+            .ok_or_else(|| "The server did not return this message's content".to_string())?;
+        let body = content::extract_body(raw);
+        let _ = session.logout();
+        Ok(body)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Resolve the message ids under a treemap node (drill path), so the UI can
 /// preview and then act on "everything inside this tile".
 #[tauri::command]
@@ -297,6 +348,7 @@ pub fn run() {
             get_type_stats,
             get_account_stats,
             get_message_detail,
+            get_message_body,
             ids_for_path,
             ids_for_senders,
             perform_action,

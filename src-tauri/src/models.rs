@@ -100,6 +100,16 @@ pub struct MessageDetail {
     pub from_sender: Vec<MessageRow>,
 }
 
+/// Full content of one message, fetched live and on demand. Never cached and
+/// never produced during a bulk scan.
+#[derive(Debug, Clone, Serialize)]
+pub struct MessageBody {
+    /// "text", "html", or "none" (no readable part could be found).
+    pub content_type: String,
+    pub content: String,
+    pub truncated: bool,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct TypeStat {
     pub cat: String,

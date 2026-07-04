@@ -337,7 +337,8 @@ export default function App() {
         <p className="max-w-md text-center text-sm leading-relaxed text-muted">
           Mailstat maps every message in your mailbox as a treemap, so the space hogs stand out
           at a glance. Connect over IMAP, find the heavy senders and attachments, and clean up
-          in bulk. Only sizes and headers are read. Nothing leaves this machine.
+          in bulk. Scanning reads only sizes and headers; open any message to read its full
+          content on demand, fetched live for that one message and never cached.
         </p>
         <div className="flex gap-3">
           <button

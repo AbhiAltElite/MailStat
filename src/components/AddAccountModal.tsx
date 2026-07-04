@@ -81,8 +81,8 @@ export default function AddAccountModal({ onClose, onAdd }: Props) {
       >
         <h2 className="text-[15px] font-semibold text-ink">Add IMAP account</h2>
         <p className="mt-1 text-xs leading-relaxed text-muted">
-          Mailstat reads message sizes and headers only, never bodies. The password is stored in
-          your system keychain.
+          Scanning reads message sizes and headers only. Full content is fetched only when you
+          open a specific message, and the password is stored in your system keychain.
         </p>
 
         <div className="mt-4 flex flex-wrap gap-1.5">

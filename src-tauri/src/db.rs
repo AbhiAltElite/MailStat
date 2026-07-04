@@ -77,6 +77,17 @@ pub fn init(conn: &Connection) -> rusqlite::Result<()> {
     )
 }
 
+/// True if an IMAP account with this email (case- and whitespace-insensitive)
+/// is already registered, so the same mailbox can't be added twice.
+pub fn imap_account_exists(conn: &Connection, email: &str) -> rusqlite::Result<bool> {
+    let normalized = email.trim().to_ascii_lowercase();
+    conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM accounts WHERE kind='imap' AND lower(trim(email)) = ?1)",
+        params![normalized],
+        |r| r.get(0),
+    )
+}
+
 /// Recompute per-folder counters after inserts/deletes.
 pub fn refresh_folder_totals(conn: &Connection, account_id: i64) -> rusqlite::Result<()> {
     conn.execute(
