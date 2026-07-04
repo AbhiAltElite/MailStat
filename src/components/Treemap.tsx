@@ -7,6 +7,8 @@ import { formatBytes } from "../lib/format";
 
 interface Props {
   nodes: TreeNode[];
+  /** Identifies the current drill position; zoom resets when this changes. */
+  viewKey: string;
   /** key-path of the selected tile relative to current drill position */
   selectedKey: string | null;
   onSelect: (node: TreeNode | null) => void;
@@ -26,8 +28,32 @@ interface Datum extends TreeNode {
 
 type RectNode = HierarchyRectangularNode<Datum>;
 
+const MIN_SCALE = 1;
+const MAX_SCALE = 10;
+const DRAG_THRESHOLD = 4;
+
+interface ZoomState {
+  scale: number;
+  x: number;
+  y: number;
+}
+
+const IDENTITY: ZoomState = { scale: 1, x: 0, y: 0 };
+
+function clampNum(v: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, v));
+}
+
+/** Keep the visible viewport inside the (possibly zoomed) content bounds. */
+function clampPan(x: number, y: number, scale: number, dims: { w: number; h: number }): [number, number] {
+  const minX = dims.w * (1 - scale);
+  const minY = dims.h * (1 - scale);
+  return [clampNum(x, minX, 0), clampNum(y, minY, 0)];
+}
+
 export default function Treemap({
   nodes,
+  viewKey,
   selectedKey,
   onSelect,
   onDrill,
@@ -39,6 +65,18 @@ export default function Treemap({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [dims, setDims] = useState({ w: 0, h: 0 });
   const [hover, setHover] = useState<{ node: RectNode; x: number; y: number } | null>(null);
+  const [zoom, setZoom] = useState<ZoomState>(IDENTITY);
+  const [isPanning, setIsPanning] = useState(false);
+
+  const zoomRef = useRef(zoom);
+  zoomRef.current = zoom;
+  const dimsRef = useRef(dims);
+  dimsRef.current = dims;
+
+  // A different drill position or grouping starts from a fresh view.
+  useEffect(() => {
+    setZoom(IDENTITY);
+  }, [viewKey]);
 
   useEffect(() => {
     const el = wrapRef.current;
@@ -77,6 +115,65 @@ export default function Treemap({
       .paddingInner(1)(h) as RectNode;
   }, [nodes, dims]);
 
+  // Zoom in/out around a fixed screen point, e.g. the cursor or the canvas center.
+  function zoomAt(sx: number, sy: number, factor: number) {
+    setZoom((t) => {
+      const newScale = clampNum(t.scale * factor, MIN_SCALE, MAX_SCALE);
+      if (newScale === t.scale) return t;
+      const worldX = (sx - t.x) / t.scale;
+      const worldY = (sy - t.y) / t.scale;
+      const [x, y] = clampPan(sx - worldX * newScale, sy - worldY * newScale, newScale, dimsRef.current);
+      return { scale: newScale, x, y };
+    });
+  }
+
+  // Wheel zoom: attached natively so preventDefault actually stops page scroll.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    function onWheel(e: WheelEvent) {
+      e.preventDefault();
+      const rect = canvas!.getBoundingClientRect();
+      const factor = Math.exp(-e.deltaY * 0.0015);
+      zoomAt(e.clientX - rect.left, e.clientY - rect.top, factor);
+    }
+    canvas.addEventListener("wheel", onWheel, { passive: false });
+    return () => canvas.removeEventListener("wheel", onWheel);
+  }, [dims]);
+
+  // Drag to pan. Registered once; a ref-held drag state and threshold let a
+  // stationary click still reach onClick, while an actual drag suppresses it.
+  const dragState = useRef<{ startX: number; startY: number; origX: number; origY: number; dragging: boolean } | null>(null);
+  const suppressClick = useRef(false);
+
+  useEffect(() => {
+    function onMove(e: MouseEvent) {
+      const ds = dragState.current;
+      if (!ds) return;
+      const dx = e.clientX - ds.startX;
+      const dy = e.clientY - ds.startY;
+      if (!ds.dragging && Math.hypot(dx, dy) > DRAG_THRESHOLD) {
+        ds.dragging = true;
+        setIsPanning(true);
+        setHover(null);
+      }
+      if (!ds.dragging) return;
+      const [x, y] = clampPan(ds.origX + dx, ds.origY + dy, zoomRef.current.scale, dimsRef.current);
+      setZoom((t) => ({ ...t, x, y }));
+    }
+    function onUp() {
+      if (dragState.current?.dragging) suppressClick.current = true;
+      dragState.current = null;
+      setIsPanning(false);
+    }
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, []);
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !root) return;
@@ -86,10 +183,14 @@ export default function Treemap({
     const ctx = canvas.getContext("2d")!;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, dims.w, dims.h);
+    ctx.setTransform(dpr * zoom.scale, 0, 0, dpr * zoom.scale, dpr * zoom.x, dpr * zoom.y);
 
     const groupBg = cssVar("--tm-group-bg");
     const groupText = cssVar("--tm-group-text");
     const outline = cssVar("--sel");
+    // Compare against the actual on-screen size so labels appear on tiles
+    // that are too small at 100% but become readable once zoomed in.
+    const s = zoom.scale;
 
     // Group headers (depth 1 with children)
     for (const g of root.children ?? []) {
@@ -98,7 +199,7 @@ export default function Treemap({
       const h = g.y1 - g.y0;
       ctx.fillStyle = groupBg;
       ctx.fillRect(g.x0, g.y0, w, h);
-      if (w > 40 && h > 18) {
+      if (w * s > 40 && h * s > 18) {
         ctx.fillStyle = groupText;
         ctx.font = "600 10px ui-sans-serif, system-ui";
         const label = `${g.data.label}  ·  ${formatBytes(g.data.size)}`;
@@ -127,15 +228,15 @@ export default function Treemap({
 
       if (selectedKey && keyPathOf(leaf) === selectedKey) {
         ctx.strokeStyle = outline;
-        ctx.lineWidth = 2;
-        ctx.strokeRect(leaf.x0 + 1, leaf.y0 + 1, w - 2, h - 2);
+        ctx.lineWidth = 2 / s;
+        ctx.strokeRect(leaf.x0 + 1 / s, leaf.y0 + 1 / s, w - 2 / s, h - 2 / s);
       }
 
-      if (w > 60 && h > 26) {
+      if (w * s > 60 && h * s > 26) {
         ctx.fillStyle = "rgba(255,255,255,0.92)";
         ctx.font = "11px ui-sans-serif, system-ui";
         ctx.fillText(ellipsize(ctx, d.label || "(no subject)", w - 10), leaf.x0 + 5, leaf.y0 + 14);
-        if (h > 40) {
+        if (h * s > 40) {
           ctx.fillStyle = "rgba(255,255,255,0.55)";
           ctx.font = "10px ui-sans-serif, system-ui";
           ctx.fillText(formatBytes(d.size), leaf.x0 + 5, leaf.y0 + 27);
@@ -148,12 +249,12 @@ export default function Treemap({
       for (const g of root.children ?? []) {
         if (keyPathOf(g) === selectedKey) {
           ctx.strokeStyle = outline;
-          ctx.lineWidth = 2;
-          ctx.strokeRect(g.x0 + 1, g.y0 + 1, g.x1 - g.x0 - 2, g.y1 - g.y0 - 2);
+          ctx.lineWidth = 2 / s;
+          ctx.strokeRect(g.x0 + 1 / s, g.y0 + 1 / s, g.x1 - g.x0 - 2 / s, g.y1 - g.y0 - 2 / s);
         }
       }
     }
-  }, [root, dims, selectedKey, highlightCat, theme]);
+  }, [root, dims, selectedKey, highlightCat, theme, zoom]);
 
   function hitTest(x: number, y: number): RectNode | null {
     if (!root) return null;
@@ -167,29 +268,54 @@ export default function Treemap({
     return hit;
   }
 
-  function nodeAt(e: React.MouseEvent): RectNode | null {
+  /** Screen-space canvas offset plus the world-space point under it. */
+  function pointAt(e: React.MouseEvent) {
     const rect = canvasRef.current!.getBoundingClientRect();
-    return hitTest(e.clientX - rect.left, e.clientY - rect.top);
+    const sx = e.clientX - rect.left;
+    const sy = e.clientY - rect.top;
+    const wx = (sx - zoom.x) / zoom.scale;
+    const wy = (sy - zoom.y) / zoom.scale;
+    return { sx, sy, wx, wy };
   }
+
+  const atMinZoom = zoom.scale <= MIN_SCALE;
+  const atMaxZoom = zoom.scale >= MAX_SCALE;
+  const isDefaultZoom = zoom.scale === 1 && zoom.x === 0 && zoom.y === 0;
 
   return (
     <div ref={wrapRef} className="relative h-full w-full overflow-hidden">
       <canvas
         ref={canvasRef}
-        style={{ width: dims.w, height: dims.h }}
+        style={{ width: dims.w, height: dims.h, cursor: isPanning ? "grabbing" : zoom.scale > 1 ? "grab" : "default" }}
+        onMouseDown={(e) => {
+          dragState.current = {
+            startX: e.clientX,
+            startY: e.clientY,
+            origX: zoom.x,
+            origY: zoom.y,
+            dragging: false,
+          };
+        }}
         onMouseMove={(e) => {
-          const n = nodeAt(e);
-          const rect = canvasRef.current!.getBoundingClientRect();
-          setHover(n ? { node: n, x: e.clientX - rect.left, y: e.clientY - rect.top } : null);
+          if (dragState.current?.dragging) return;
+          const { wx, wy, sx, sy } = pointAt(e);
+          const n = hitTest(wx, wy);
+          setHover(n ? { node: n, x: sx, y: sy } : null);
         }}
         onMouseLeave={() => setHover(null)}
         onClick={(e) => {
-          const n = nodeAt(e);
+          if (suppressClick.current) {
+            suppressClick.current = false;
+            return;
+          }
+          const { wx, wy } = pointAt(e);
+          const n = hitTest(wx, wy);
           // Clicking a leaf selects it; clicking a group header selects group.
           onSelect(n && n.depth > 0 ? topLevelAncestorOrSelf(n) : null);
         }}
         onDoubleClick={(e) => {
-          const n = nodeAt(e);
+          const { wx, wy } = pointAt(e);
+          const n = hitTest(wx, wy);
           if (!n) return;
           // A message tile opens the detail drawer; a group drills in.
           if (n.data.key.startsWith("m:")) {
@@ -216,6 +342,34 @@ export default function Treemap({
           </div>
         </div>
       )}
+      <div className="absolute right-2 bottom-2 z-10 flex items-center gap-0.5 rounded-md border border-line bg-surface/95 p-0.5 shadow-lg">
+        <button
+          onClick={() => zoomAt(dims.w / 2, dims.h / 2, 1 / 1.4)}
+          disabled={atMinZoom}
+          className="rounded px-2 py-1 text-sm text-ink hover:bg-raised disabled:opacity-35"
+          aria-label="Zoom out"
+          title="Zoom out"
+        >
+          −
+        </button>
+        <button
+          onClick={() => setZoom(IDENTITY)}
+          disabled={isDefaultZoom}
+          className="rounded px-2 py-1 text-[11px] tabular-nums text-muted hover:bg-raised hover:text-ink disabled:opacity-35"
+          title="Reset zoom"
+        >
+          {Math.round(zoom.scale * 100)}%
+        </button>
+        <button
+          onClick={() => zoomAt(dims.w / 2, dims.h / 2, 1.4)}
+          disabled={atMaxZoom}
+          className="rounded px-2 py-1 text-sm text-ink hover:bg-raised disabled:opacity-35"
+          aria-label="Zoom in"
+          title="Zoom in"
+        >
+          +
+        </button>
+      </div>
     </div>
   );
 }

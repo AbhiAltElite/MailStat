@@ -23,6 +23,7 @@ import TopPanel, { type TopTab } from "./components/TopPanel";
 import AddAccountModal from "./components/AddAccountModal";
 import ConfirmDialog, { type PendingAction } from "./components/ConfirmDialog";
 import MessageDetail from "./components/MessageDetail";
+import ResizeHandle from "./components/ResizeHandle";
 
 const GROUPINGS: { id: string; label: string; dims: string[] }[] = [
   { id: "folder-sender", label: "Folder, then sender", dims: ["folder", "sender"] },
@@ -39,8 +40,21 @@ function initialTheme(): Theme {
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
+const PANEL_BOUNDS = {
+  left: { min: 200, max: 420, default: 240 },
+  right: { min: 260, max: 520, default: 320 },
+};
+
+function initialPanelWidth(key: "mailstat-left-width" | "mailstat-right-width", bounds: { min: number; max: number; default: number }): number {
+  const stored = Number(localStorage.getItem(key));
+  if (Number.isFinite(stored) && stored >= bounds.min && stored <= bounds.max) return stored;
+  return bounds.default;
+}
+
 export default function App() {
   const [theme, setTheme] = useState<Theme>(initialTheme);
+  const [leftWidth, setLeftWidth] = useState(() => initialPanelWidth("mailstat-left-width", PANEL_BOUNDS.left));
+  const [rightWidth, setRightWidth] = useState(() => initialPanelWidth("mailstat-right-width", PANEL_BOUNDS.right));
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [accountId, setAccountId] = useState<number | null>(null);
   const [folders, setFolders] = useState<FolderInfo[]>([]);
@@ -72,6 +86,15 @@ export default function App() {
     document.documentElement.dataset.theme = theme;
     localStorage.setItem("mailstat-theme", theme);
   }, [theme]);
+
+  useEffect(() => {
+    localStorage.setItem("mailstat-left-width", String(leftWidth));
+  }, [leftWidth]);
+  useEffect(() => {
+    localStorage.setItem("mailstat-right-width", String(rightWidth));
+  }, [rightWidth]);
+
+  const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
 
   const notify = useCallback((msg: string) => {
     setToast(msg);
@@ -459,7 +482,10 @@ export default function App() {
       )}
 
       <div className="flex min-h-0 flex-1">
-        <aside className="w-60 shrink-0 overflow-y-auto border-r border-line bg-surface p-2">
+        <aside
+          style={{ width: leftWidth }}
+          className="shrink-0 overflow-y-auto border-r border-line bg-surface p-2"
+        >
           <p className="px-2 pb-1 text-[11px] font-semibold tracking-wider text-faint uppercase">
             Folders
           </p>
@@ -474,6 +500,11 @@ export default function App() {
           </p>
           <TypeLegend stats={typeStats} highlight={highlightCat} onHighlight={setHighlightCat} />
         </aside>
+        <ResizeHandle
+          onDrag={(dx) =>
+            setLeftWidth((w) => clamp(w + dx, PANEL_BOUNDS.left.min, PANEL_BOUNDS.left.max))
+          }
+        />
 
         <main className="flex min-w-0 flex-1 flex-col">
           <div className="flex items-center gap-1 border-b border-line bg-surface px-2 py-1 text-xs">
@@ -509,6 +540,7 @@ export default function App() {
             ) : (
               <Treemap
                 nodes={nodes}
+                viewKey={`${grouping.id}|${drillPath.map((s) => `${s.dim}:${s.key}`).join("/")}`}
                 selectedKey={selected?.key ?? null}
                 onSelect={setSelected}
                 onDrill={drillTo}
@@ -520,7 +552,12 @@ export default function App() {
           </div>
         </main>
 
-        <aside className="w-80 shrink-0 border-l border-line bg-surface">
+        <ResizeHandle
+          onDrag={(dx) =>
+            setRightWidth((w) => clamp(w - dx, PANEL_BOUNDS.right.min, PANEL_BOUNDS.right.max))
+          }
+        />
+        <aside style={{ width: rightWidth }} className="shrink-0 border-l border-line bg-surface">
           <TopPanel
             tab={tab}
             onTab={setTab}
