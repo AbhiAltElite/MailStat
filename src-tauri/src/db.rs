@@ -6,6 +6,11 @@ pub fn open(path: &Path) -> rusqlite::Result<Connection> {
     conn.pragma_update(None, "journal_mode", "WAL")?;
     conn.pragma_update(None, "synchronous", "NORMAL")?;
     conn.pragma_update(None, "foreign_keys", "ON")?;
+    // A background scan and a user action (trash/delete) run on separate
+    // connections and both write. WAL serializes writers, so without a busy
+    // timeout the second writer would fail immediately with SQLITE_BUSY; wait
+    // instead so the two just take turns rather than surfacing a spurious error.
+    conn.busy_timeout(std::time::Duration::from_secs(5))?;
     Ok(conn)
 }
 

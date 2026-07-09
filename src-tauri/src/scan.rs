@@ -22,7 +22,15 @@ pub struct ImapCreds {
 }
 
 pub fn connect(c: &ImapCreds) -> Result<ImapSession, String> {
+    // Never put credentials on the wire in the clear. AutoTls uses implicit
+    // TLS on 993 and STARTTLS otherwise, and fails outright rather than
+    // falling back to a plaintext connection. Certificates and hostnames are
+    // validated by the TLS backend — we never enable skip-tls-verify — so a
+    // man-in-the-middle can't present its own cert to harvest the password.
+    // Pinned explicitly so the security posture can't silently change if the
+    // library's default connection mode ever does.
     let client = imap::ClientBuilder::new(&c.host, c.port)
+        .mode(imap::ConnectionMode::AutoTls)
         .connect()
         .map_err(|e| format!("Connection failed: {e}"))?;
     client
