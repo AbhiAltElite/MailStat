@@ -208,6 +208,15 @@ export default function Treemap({
       const h = g.y1 - g.y0;
       ctx.fillStyle = groupBg;
       ctx.fillRect(g.x0, g.y0, w, h);
+      // Tint the body with a faint version of the group's own color. Leaf
+      // tiles paint over this, so it only shows in the gaps where child tiles
+      // were too small to draw — turning what used to be a dark "empty" void
+      // into a muted, clearly-this-group region that invites drilling in.
+      const gColor = g.data.cat === "mixed" ? hashColor(g.data.key + g.data.label) : colorFor(g.data.cat);
+      ctx.globalAlpha = 0.22;
+      ctx.fillStyle = gColor;
+      ctx.fillRect(g.x0, g.y0, w, h);
+      ctx.globalAlpha = 1;
       if (w * s > 40 && h * s > 18) {
         ctx.save();
         ctx.beginPath();
@@ -232,13 +241,25 @@ export default function Treemap({
       // blank because it once measured under a fixed world-space threshold.
       if (w * s < 0.75 || h * s < 0.75) continue;
       const d = leaf.data;
-      const base =
-        d.cat === "mixed" ? hashColor(d.key + d.label) : colorFor(d.cat);
+      // The "N more…" remainder bucket takes its parent group's color instead
+      // of a flat grey, so it reads as "the rest of this sender/folder — drill
+      // in to see it" rather than a dead block sitting inside a colored group.
+      const isOther = d.key === "__other__";
+      const parent = leaf.parent?.data;
+      const base = isOther
+        ? parent && parent.cat === "mixed"
+          ? hashColor(parent.key + parent.label)
+          : colorFor(parent?.cat ?? "other")
+        : d.cat === "mixed"
+          ? hashColor(d.key + d.label)
+          : colorFor(d.cat);
       const dimmed = highlightCat && d.cat !== highlightCat;
       const grad = ctx.createLinearGradient(leaf.x0, leaf.y0, leaf.x0, leaf.y1);
       grad.addColorStop(0, shade(base, 18));
       grad.addColorStop(1, shade(base, -22));
-      ctx.globalAlpha = dimmed ? 0.18 : 1;
+      // Mute the remainder bucket so it reads as an aggregate placeholder, not
+      // a real message tile the user could act on individually.
+      ctx.globalAlpha = dimmed ? 0.18 : isOther ? 0.5 : 1;
       ctx.fillStyle = grad;
       ctx.fillRect(leaf.x0, leaf.y0, w, h);
       ctx.globalAlpha = 1;

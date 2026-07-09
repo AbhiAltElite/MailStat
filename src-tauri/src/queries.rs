@@ -2,7 +2,12 @@ use crate::models::*;
 use rusqlite::{params_from_iter, types::Value, Connection};
 
 const CHILD_CAP: usize = 300;
-const GRANDCHILD_CAP: usize = 25;
+// How many real child tiles to break out inside each group before the rest is
+// rolled into a single "N more…" bucket. Kept generous so a group preview
+// shows actual messages/senders instead of collapsing almost everything into
+// one flat lump that reveals nothing when zoomed — the user still double-clicks
+// to drill in for the complete, uncapped view.
+const GRANDCHILD_CAP: usize = 60;
 const MSG_CAP: usize = 1200;
 
 /// Translate a drill-path segment into a WHERE clause + bound value.
