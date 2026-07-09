@@ -29,7 +29,11 @@ interface Datum extends TreeNode {
 type RectNode = HierarchyRectangularNode<Datum>;
 
 const MIN_SCALE = 1;
-const MAX_SCALE = 10;
+// A mailbox view can hold hundreds of message tiles, some a fraction of a
+// pixel wide at 100%. Cap zoom high enough that even those can be enlarged
+// until they actually render and can be clicked, instead of staying blank
+// no matter how far you zoom.
+const MAX_SCALE = 60;
 const DRAG_THRESHOLD = 4;
 
 interface ZoomState {
